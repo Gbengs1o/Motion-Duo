@@ -14,11 +14,15 @@ const tools = [
   { id: 'text', icon: Type, label: 'Text' },
 ];
 
-export const Toolbox: React.FC = () => {
+interface ToolboxProps {
+  className?: string;
+}
+
+export const Toolbox: React.FC<ToolboxProps> = ({ className }) => {
   const [activeTool, setActiveTool] = React.useState('pencil');
 
   return (
-    <div className="w-16 h-full bg-[#232326] border-r border-white/5 flex flex-col items-center py-6 gap-6 shrink-0">
+    <div className={className || "w-16 h-full bg-[#232326] border-r border-white/5 flex flex-col items-center py-6 gap-6 shrink-0"}>
       <div className="flex flex-col gap-2">
         {tools.map((tool) => (
           <Tooltip key={tool.id}>

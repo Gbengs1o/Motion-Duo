@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { AppMode, Layer } from '@/app/lib/motion-duo-types';
 import { ModeSwitch } from '@/components/ModeSwitch';
 import { Toolbox } from '@/components/Toolbox';
@@ -10,6 +10,9 @@ import { BottomControls } from '@/components/BottomControls';
 import { MediaModal } from '@/components/MediaModal';
 import { generateMotionGraphics } from '@/ai/flows/generate-motion-graphics-from-sketch-and-text-flow';
 import { useToast } from '@/hooks/use-toast';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Menu, Layers as LayersIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export default function MotionDuoApp() {
   const [appMode, setAppMode] = useState<AppMode>('sketch');
@@ -26,24 +29,23 @@ export default function MotionDuoApp() {
   const handleModeToggle = (mode: AppMode) => {
     if (mode === 'motion' && appMode === 'sketch') {
       triggerMotionSynthesis();
+    } else {
+      setAppMode(mode);
     }
-    setAppMode(mode);
   };
 
   const triggerMotionSynthesis = async () => {
-    // In a real app, we'd grab the canvas data URI here.
-    // Since we're in a high-level state machine, we use a placeholder canvas for the AI flow.
     const canvas = document.querySelector('canvas');
     const dataUri = canvas?.toDataURL('image/png') || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     
     setIsLoading(true);
+    setAppMode('motion'); // Optimistically switch mode to show loader in workspace
     try {
       const result = await generateMotionGraphics({
         canvasDataUri: dataUri,
         description: description || "Generate a smooth animation based on the elements in the sketch.",
       });
       setMotionHtml(result.htmlCssMotionGraphics);
-      setAppMode('motion');
     } catch (error) {
       toast({
         title: "Synthesis Failed",
@@ -80,11 +82,12 @@ export default function MotionDuoApp() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden text-foreground bg-background">
+    <div className="flex flex-col h-[100dvh] w-screen overflow-hidden text-foreground bg-background">
       <ModeSwitch mode={appMode} setMode={handleModeToggle} />
 
-      <div className="flex flex-1 overflow-hidden">
-        <Toolbox />
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Desktop Toolbox */}
+        <Toolbox className="hidden md:flex w-16 h-full bg-[#232326] border-r border-white/5 flex-col items-center py-6 gap-6 shrink-0" />
 
         <main className="flex-1 relative flex flex-col min-w-0">
           <CanvasWorkspace 
@@ -99,16 +102,50 @@ export default function MotionDuoApp() {
             onUndo={() => {}} 
             onRedo={() => {}} 
           />
+
+          {/* Mobile floating tool triggers */}
+          <div className="absolute top-4 right-4 flex flex-col gap-2 md:hidden">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button size="icon" variant="secondary" className="rounded-full shadow-lg h-10 w-10 bg-[#232326] border border-white/10">
+                  <LayersIcon className="w-5 h-5 text-primary" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="p-0 bg-[#232326] border-white/5 w-[280px]">
+                <SidePanel 
+                  description={description}
+                  setDescription={setDescription}
+                  layers={layers}
+                  onToggleVisibility={handleToggleVisibility}
+                  onToggleLock={handleToggleLock}
+                  onImport={() => setIsMediaModalOpen(true)}
+                  className="w-full h-full flex flex-col"
+                />
+              </SheetContent>
+            </Sheet>
+
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button size="icon" variant="secondary" className="rounded-full shadow-lg h-10 w-10 bg-[#232326] border border-white/10">
+                  <Menu className="w-5 h-5 text-white" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="p-0 bg-[#232326] border-white/5 w-20">
+                <Toolbox className="w-full h-full flex flex-col items-center py-6 gap-6" />
+              </SheetContent>
+            </Sheet>
+          </div>
         </main>
 
+        {/* Desktop Side Panel */}
         <SidePanel 
           description={description}
           setDescription={setDescription}
           layers={layers}
           onToggleVisibility={handleToggleVisibility}
           onToggleLock={handleToggleLock}
-          onGenerate={triggerMotionSynthesis}
           onImport={() => setIsMediaModalOpen(true)}
+          className="hidden md:flex w-[320px] h-full bg-[#232326] border-l border-white/5 flex-col shrink-0"
         />
       </div>
 
