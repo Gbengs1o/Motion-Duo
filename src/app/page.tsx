@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -22,10 +23,17 @@ export default function MotionDuoApp() {
   const [motionHtml, setMotionHtml] = useState<string | null>(null);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(true);
+  
+  // Vector Tool States
+  const [activeTool, setActiveTool] = useState('pen');
+  const [activeShape, setActiveShape] = useState('rect');
+  const [primaryColor, setPrimaryColor] = useState('#806CE0');
+  const [canvasColor, setCanvasColor] = useState('#121214');
+
   const { toast } = useToast();
 
   const [layers, setLayers] = useState<Layer[]>([
-    { id: 'l1', name: 'Sketch Layer 1', type: 'sketch', visible: true, locked: false },
+    { id: 'l1', name: 'Vector Layer 1', type: 'sketch', visible: true, locked: false },
   ]);
 
   const handleModeToggle = (mode: AppMode) => {
@@ -41,7 +49,7 @@ export default function MotionDuoApp() {
     const dataUri = canvas?.toDataURL('image/png') || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     
     setIsLoading(true);
-    setAppMode('motion'); // Optimistically switch mode to show loader in workspace
+    setAppMode('motion');
     try {
       const result = await generateMotionGraphics({
         canvasDataUri: dataUri,
@@ -94,7 +102,17 @@ export default function MotionDuoApp() {
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Desktop Toolbox */}
-        <Toolbox className="hidden md:flex w-16 h-full bg-[#232326] border-r border-white/5 flex-col items-center py-6 gap-6 shrink-0" />
+        <Toolbox 
+          className="hidden md:flex w-16 h-full bg-[#232326] border-r border-white/5 flex-col items-center py-6 gap-6 shrink-0" 
+          activeTool={activeTool}
+          setActiveTool={setActiveTool}
+          activeShape={activeShape}
+          setActiveShape={setActiveShape}
+          primaryColor={primaryColor}
+          setPrimaryColor={setPrimaryColor}
+          canvasColor={canvasColor}
+          setCanvasColor={setCanvasColor}
+        />
 
         <main className="flex-1 relative flex flex-col min-w-0">
           <CanvasWorkspace 
@@ -103,6 +121,9 @@ export default function MotionDuoApp() {
             motionHtml={motionHtml}
             onUndo={() => {}} 
             onRedo={() => {}}
+            activeTool={activeTool}
+            primaryColor={primaryColor}
+            canvasColor={canvasColor}
           />
           <BottomControls 
             appMode={appMode} 
@@ -144,7 +165,17 @@ export default function MotionDuoApp() {
                 <SheetHeader className="sr-only">
                   <SheetTitle>Tools</SheetTitle>
                 </SheetHeader>
-                <Toolbox className="w-full h-full flex flex-col items-center py-6 gap-6" />
+                <Toolbox 
+                  className="w-full h-full flex flex-col items-center py-6 gap-6" 
+                  activeTool={activeTool}
+                  setActiveTool={setActiveTool}
+                  activeShape={activeShape}
+                  setActiveShape={setActiveShape}
+                  primaryColor={primaryColor}
+                  setPrimaryColor={setPrimaryColor}
+                  canvasColor={canvasColor}
+                  setCanvasColor={setCanvasColor}
+                />
               </SheetContent>
             </Sheet>
           </div>

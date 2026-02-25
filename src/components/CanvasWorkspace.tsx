@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
@@ -11,6 +12,9 @@ interface CanvasWorkspaceProps {
   motionHtml: string | null;
   onUndo: () => void;
   onRedo: () => void;
+  activeTool: string;
+  primaryColor: string;
+  canvasColor: string;
 }
 
 export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
@@ -19,6 +23,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   motionHtml,
   onUndo,
   onRedo,
+  activeTool,
+  primaryColor,
+  canvasColor
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -27,22 +34,24 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   
   // Transform state for pan/zoom
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
-  const [lastTouchPos, setLastTouchPos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Responsive canvas sizing
     const resize = () => {
-      const { width, height } = canvas.getBoundingClientRect();
+      const container = containerRef.current;
+      if (!container) return;
+      
+      const { width, height } = container.getBoundingClientRect();
       canvas.width = width * window.devicePixelRatio;
       canvas.height = height * window.devicePixelRatio;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
         ctx.lineCap = 'round';
-        ctx.strokeStyle = '#806CE0';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = primaryColor;
         ctx.lineWidth = 3;
         contextRef.current = ctx;
       }
@@ -51,7 +60,14 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     window.addEventListener('resize', resize);
     resize();
     return () => window.removeEventListener('resize', resize);
-  }, []);
+  }, [primaryColor]);
+
+  // Update stroke style when primaryColor changes
+  useEffect(() => {
+    if (contextRef.current) {
+      contextRef.current.strokeStyle = primaryColor;
+    }
+  }, [primaryColor]);
 
   const getPointerPos = (e: React.PointerEvent | PointerEvent) => {
     const canvas = canvasRef.current;
@@ -64,18 +80,27 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   };
 
   const startDrawing = (e: React.PointerEvent) => {
-    if (appMode !== 'sketch' || e.pointerType === 'mouse' && e.button !== 0) return;
-    const { x, y } = getPointerPos(e);
-    contextRef.current?.beginPath();
-    contextRef.current?.moveTo(x, y);
-    setIsDrawing(true);
+    if (appMode !== 'sketch' || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    
+    // Simple drawing logic for Pen and Eraser
+    if (activeTool === 'pen' || activeTool === 'eraser') {
+      const { x, y } = getPointerPos(e);
+      if (contextRef.current) {
+        contextRef.current.globalCompositeOperation = activeTool === 'eraser' ? 'destination-out' : 'source-over';
+        contextRef.current.beginPath();
+        contextRef.current.moveTo(x, y);
+        setIsDrawing(true);
+      }
+    }
   };
 
   const draw = (e: React.PointerEvent) => {
     if (!isDrawing || appMode !== 'sketch') return;
     const { x, y } = getPointerPos(e);
-    contextRef.current?.lineTo(x, y);
-    contextRef.current?.stroke();
+    if (contextRef.current) {
+      contextRef.current.lineTo(x, y);
+      contextRef.current.stroke();
+    }
   };
 
   const endDrawing = () => {
@@ -84,11 +109,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     setIsDrawing(false);
   };
 
-  // Gesture Handling (Simplified Placeholder Logic)
   const handleTouch = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      // Pinch/Pan logic would go here
-      // For now we just track to prevent scroll
       e.preventDefault();
     }
   }, []);
@@ -96,7 +118,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   return (
     <div 
       ref={containerRef}
-      className="relative w-full h-full bg-[#121214] overflow-hidden flex items-center justify-center cursor-crosshair canvas-container"
+      className="relative w-full h-full overflow-hidden flex items-center justify-center canvas-container"
+      style={{ backgroundColor: canvasColor }}
       onTouchMove={handleTouch}
     >
       <canvas
@@ -107,7 +130,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         onPointerLeave={endDrawing}
         className={cn(
           "w-full h-full transition-opacity duration-500",
-          appMode === 'motion' ? "opacity-30 pointer-events-none" : "opacity-100"
+          appMode === 'motion' ? "opacity-30 pointer-events-none" : "opacity-100",
+          activeTool === 'select' ? "cursor-default" : "cursor-crosshair"
         )}
         style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
@@ -131,9 +155,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         </div>
       )}
 
-      {/* Hints */}
-      <div className="absolute top-4 left-4 text-[10px] text-muted-foreground uppercase tracking-widest pointer-events-none">
-        {appMode === 'sketch' ? 'Drawing Active' : 'Motion Preview'}
+      {/* Tool Label */}
+      <div className="absolute top-4 left-4 text-[10px] text-white/30 uppercase tracking-[0.2em] pointer-events-none font-bold">
+        {appMode === 'sketch' ? `${activeTool.toUpperCase()} MODE` : 'MOTION PREVIEW'}
       </div>
     </div>
   );
