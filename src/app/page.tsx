@@ -10,7 +10,7 @@ import { BottomControls } from '@/components/BottomControls';
 import { MediaModal } from '@/components/MediaModal';
 import { generateMotionGraphics } from '@/ai/flows/generate-motion-graphics-from-sketch-and-text-flow';
 import { useToast } from '@/hooks/use-toast';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Layers as LayersIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -112,6 +112,9 @@ export default function MotionDuoApp() {
                 </Button>
               </SheetTrigger>
               <SheetContent side="right" className="p-0 bg-[#232326] border-white/5 w-[280px]">
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Layers and Settings</SheetTitle>
+                </SheetHeader>
                 <SidePanel 
                   description={description}
                   setDescription={setDescription}
@@ -131,6 +134,9 @@ export default function MotionDuoApp() {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="p-0 bg-[#232326] border-white/5 w-20">
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Tools</SheetTitle>
+                </SheetHeader>
                 <Toolbox className="w-full h-full flex flex-col items-center py-6 gap-6" />
               </SheetContent>
             </Sheet>
