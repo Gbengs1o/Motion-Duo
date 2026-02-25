@@ -33,34 +33,56 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const [currentElement, setCurrentElement] = useState<VectorElement | null>(null);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
+  const [dragStartPos, setDragStartPos] = useState<Point>({ x: 0, y: 0 });
 
-  // Hit testing logic for various shapes
+  const getPointerPos = (e: React.PointerEvent | PointerEvent): Point => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+  };
+
   const isPointInElement = (pos: Point, el: VectorElement): boolean => {
     if (el.type === 'rect') {
-      const left = Math.min(el.x!, el.x! + el.width!);
-      const right = Math.max(el.x!, el.x! + el.width!);
-      const top = Math.min(el.y!, el.y! + el.height!);
-      const bottom = Math.max(el.y!, el.y! + el.height!);
+      const x = el.x || 0;
+      const y = el.y || 0;
+      const w = el.width || 0;
+      const h = el.height || 0;
+      const left = Math.min(x, x + w);
+      const right = Math.max(x, x + w);
+      const top = Math.min(y, y + h);
+      const bottom = Math.max(y, y + h);
       return pos.x >= left && pos.x <= right && pos.y >= top && pos.y <= bottom;
     }
     if (el.type === 'circle') {
-      const dist = Math.sqrt(Math.pow(pos.x - el.x!, 2) + Math.pow(pos.y - el.y!, 2));
-      return dist <= el.radius!;
+      const dist = Math.sqrt(Math.pow(pos.x - (el.x || 0), 2) + Math.pow(pos.y - (el.y || 0), 2));
+      return dist <= Math.abs(el.radius || 0);
     }
     if (el.type === 'path' && el.points) {
-      // Basic bounding box for paths for simplicity in hit-testing
       const xs = el.points.map(p => p.x);
       const ys = el.points.map(p => p.y);
       const minX = Math.min(...xs);
       const maxX = Math.max(...xs);
       const minY = Math.min(...ys);
       const maxY = Math.max(...ys);
-      return pos.x >= minX - 10 && pos.x <= maxX + 10 && pos.y >= minY - 10 && pos.y <= maxY + 10;
+      return pos.x >= minX - 5 && pos.x <= maxX + 5 && pos.y >= minY - 5 && pos.y <= maxY + 5;
     }
     if (el.type === 'text') {
-       // Approximate text hit box
-       return pos.x >= el.x! && pos.x <= el.x! + 100 && pos.y >= el.y! - 24 && pos.y <= el.y!;
+       return pos.x >= (el.x || 0) && pos.x <= (el.x || 0) + 100 && pos.y >= (el.y || 0) - 24 && pos.y <= (el.y || 0);
+    }
+    if (el.type === 'triangle') {
+      const x = el.x || 0;
+      const y = el.y || 0;
+      const w = el.width || 0;
+      const h = el.height || 0;
+      return pos.x >= x - w/2 && pos.x <= x + w/2 && pos.y >= y - h/2 && pos.y <= y + h/2;
+    }
+    if (el.type === 'polygon') {
+      const dist = Math.sqrt(Math.pow(pos.x - (el.x || 0), 2) + Math.pow(pos.y - (el.y || 0), 2));
+      return dist <= Math.abs(el.radius || 0);
     }
     return false;
   };
@@ -80,53 +102,72 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
     allElements.forEach((el) => {
       ctx.beginPath();
-      ctx.fillStyle = el.color;
       ctx.strokeStyle = el.color;
+      ctx.fillStyle = el.color;
       ctx.lineWidth = 3;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
-      if (el.type === 'path' && el.points && el.points.length > 1) {
+      if (el.type === 'path' && el.points && el.points.length > 0) {
         ctx.moveTo(el.points[0].x, el.points[0].y);
         for (let i = 1; i < el.points.length; i++) {
           ctx.lineTo(el.points[i].x, el.points[i].y);
         }
         ctx.stroke();
       } else if (el.type === 'rect') {
-        ctx.strokeRect(el.x!, el.y!, el.width!, el.height!);
+        ctx.strokeRect(el.x || 0, el.y || 0, el.width || 0, el.height || 0);
       } else if (el.type === 'circle') {
-        ctx.arc(el.x!, el.y!, Math.abs(el.radius!), 0, Math.PI * 2);
+        ctx.arc(el.x || 0, el.y || 0, Math.abs(el.radius || 0), 0, Math.PI * 2);
         ctx.stroke();
       } else if (el.type === 'triangle') {
-        ctx.moveTo(el.x!, el.y! - (el.height! / 2));
-        ctx.lineTo(el.x! - (el.width! / 2), el.y! + (el.height! / 2));
-        ctx.lineTo(el.x! + (el.width! / 2), el.y! + (el.height! / 2));
+        const x = el.x || 0;
+        const y = el.y || 0;
+        const w = el.width || 0;
+        const h = el.height || 0;
+        ctx.moveTo(x, y - h / 2);
+        ctx.lineTo(x - w / 2, y + h / 2);
+        ctx.lineTo(x + w / 2, y + h / 2);
         ctx.closePath();
         ctx.stroke();
       } else if (el.type === 'polygon') {
         const sides = 6;
-        const r = Math.abs(el.radius!);
+        const r = Math.abs(el.radius || 0);
+        const x = el.x || 0;
+        const y = el.y || 0;
         for (let i = 0; i <= sides; i++) {
           const angle = (i * 2 * Math.PI) / sides;
-          const px = el.x! + r * Math.cos(angle);
-          const py = el.y! + r * Math.sin(angle);
+          const px = x + r * Math.cos(angle);
+          const py = y + r * Math.sin(angle);
           if (i === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         }
         ctx.stroke();
       } else if (el.type === 'text' && el.text) {
-        ctx.font = `${el.fontSize}px Inter, sans-serif`;
-        ctx.fillText(el.text, el.x!, el.y!);
+        ctx.font = `${el.fontSize || 24}px Inter, sans-serif`;
+        ctx.fillText(el.text, el.x || 0, el.y || 0);
       }
 
       if (selectedElementId === el.id && appMode === 'sketch') {
+        ctx.save();
         ctx.strokeStyle = '#806CE0';
         ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
-        // Bounding box for selection highlight
-        if (el.type === 'rect') ctx.strokeRect(el.x! - 5, el.y! - 5, el.width! + 10, el.height! + 10);
-        else if (el.type === 'circle') ctx.strokeRect(el.x! - el.radius! - 5, el.y! - el.radius! - 5, (el.radius! * 2) + 10, (el.radius! * 2) + 10);
-        ctx.setLineDash([]);
+        // Simple bounding box for selection
+        if (el.type === 'rect') {
+          ctx.strokeRect((el.x || 0) - 5, (el.y || 0) - 5, (el.width || 0) + 10, (el.height || 0) + 10);
+        } else if (el.type === 'circle' || el.type === 'polygon') {
+          const r = Math.abs(el.radius || 0);
+          ctx.strokeRect((el.x || 0) - r - 5, (el.y || 0) - r - 5, (r * 2) + 10, (r * 2) + 10);
+        } else if (el.type === 'path' && el.points) {
+          const xs = el.points.map(p => p.x);
+          const ys = el.points.map(p => p.y);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          ctx.strokeRect(minX - 5, minY - 5, (maxX - minX) + 10, (maxY - minY) + 10);
+        }
+        ctx.restore();
       }
     });
 
@@ -155,16 +196,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     render();
   }, [render, elements, currentElement]);
 
-  const getPointerPos = (e: React.PointerEvent): Point => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
-  };
-
   const startDrawing = (e: React.PointerEvent) => {
     if (appMode !== 'sketch') return;
     const pos = getPointerPos(e);
@@ -175,7 +206,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       if (hit) {
         setSelectedElementId(hit.id);
         setIsDragging(true);
-        setDragOffset({ x: pos.x - hit.x!, y: pos.y - hit.y! });
+        setDragStartPos(pos);
       } else {
         setSelectedElementId(null);
       }
@@ -187,7 +218,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     } else if (activeTool === 'eraser') {
       setElements(prev => prev.filter(el => !isPointInElement(pos, el)));
     } else if (activeTool === 'fill') {
-      setElements(prev => prev.map(el => isPointInElement(pos, el) ? { ...el, color: primaryColor } : el));
+      const hit = [...elements].reverse().find(el => isPointInElement(pos, el));
+      if (hit) {
+        setElements(prev => prev.map(el => el.id === hit.id ? { ...el, color: primaryColor } : el));
+      }
     } else if (activeTool === 'text') {
       const text = prompt("Enter text:");
       if (text) {
@@ -201,27 +235,33 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     const pos = getPointerPos(e);
 
     if (isDragging && selectedElementId && activeTool === 'select') {
+      const dx = pos.x - dragStartPos.x;
+      const dy = pos.y - dragStartPos.y;
+      
       setElements(prev => prev.map(el => {
         if (el.id === selectedElementId) {
           if (el.type === 'path' && el.points) {
-            const dx = pos.x - el.points[0].x - dragOffset.x;
-            const dy = pos.y - el.points[0].y - dragOffset.y;
             return { ...el, points: el.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
           }
-          return { ...el, x: pos.x - dragOffset.x, y: pos.y - dragOffset.y };
+          return { ...el, x: (el.x || 0) + dx, y: (el.y || 0) + dy };
         }
         return el;
       }));
+      setDragStartPos(pos);
     } else if (currentElement) {
       if (currentElement.type === 'path') {
-        setCurrentElement({ ...currentElement, points: [...currentElement.points!, pos] });
+        setCurrentElement({ ...currentElement, points: [...(currentElement.points || []), pos] });
       } else if (currentElement.type === 'rect') {
-        setCurrentElement({ ...currentElement, width: pos.x - currentElement.x!, height: pos.y - currentElement.y! });
+        setCurrentElement({ ...currentElement, width: pos.x - (currentElement.x || 0), height: pos.y - (currentElement.y || 0) });
       } else if (currentElement.type === 'circle' || currentElement.type === 'polygon') {
-        const radius = Math.sqrt(Math.pow(pos.x - currentElement.x!, 2) + Math.pow(pos.y - currentElement.y!, 2));
+        const radius = Math.sqrt(Math.pow(pos.x - (currentElement.x || 0), 2) + Math.pow(pos.y - (currentElement.y || 0), 2));
         setCurrentElement({ ...currentElement, radius });
       } else if (currentElement.type === 'triangle') {
-        setCurrentElement({ ...currentElement, width: Math.abs(pos.x - currentElement.x!) * 2, height: Math.abs(pos.y - currentElement.y!) * 2 });
+        setCurrentElement({ 
+          ...currentElement, 
+          width: Math.abs(pos.x - (currentElement.x || 0)) * 2, 
+          height: Math.abs(pos.y - (currentElement.y || 0)) * 2 
+        });
       }
     }
   };
