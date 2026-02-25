@@ -31,8 +31,20 @@ export interface VectorElement {
   width?: number;
   height?: number;
   radius?: number;
+  rotation?: number; // Rotation in radians
   color: string;
   text?: string;
   fontSize?: number;
   sides?: number; // For polygons
+}
+
+export interface BoundingBox {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+  centerX: number;
+  centerY: number;
 }

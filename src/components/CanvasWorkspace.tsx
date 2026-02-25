@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { AppMode, VectorElement, Point, VectorElementType } from '@/app/lib/motion-duo-types';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { AppMode, VectorElement, Point, VectorElementType, BoundingBox } from '@/app/lib/motion-duo-types';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 
@@ -16,6 +16,12 @@ interface CanvasWorkspaceProps {
   primaryColor: string;
   canvasColor: string;
 }
+
+type TransformType = 'move' | 'resize' | 'rotate' | 'none';
+type HandleId = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se' | 'rotate';
+
+const HANDLE_SIZE = 8;
+const ROTATE_HANDLE_OFFSET = 30;
 
 export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   appMode,
@@ -33,9 +39,11 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const [currentElement, setCurrentElement] = useState<VectorElement | null>(null);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   
-  // Dragging state for transformation
-  const [isDragging, setIsDragging] = useState(false);
+  // Transformation state
+  const [transformType, setTransformType] = useState<TransformType>('none');
+  const [activeHandle, setActiveHandle] = useState<HandleId | null>(null);
   const [lastPos, setLastPos] = useState<Point>({ x: 0, y: 0 });
+  const [initialTransformState, setInitialTransformState] = useState<any>(null);
 
   const getPointerPos = (e: React.PointerEvent | PointerEvent): Point => {
     const canvas = canvasRef.current;
@@ -47,66 +55,70 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     };
   };
 
-  const isPointInElement = (pos: Point, el: VectorElement): boolean => {
-    const threshold = 12; // Click tolerance
-    
-    if (el.type === 'rect') {
-      const x = el.x || 0;
-      const y = el.y || 0;
-      const w = el.width || 0;
-      const h = el.height || 0;
-      const left = Math.min(x, x + w);
-      const right = Math.max(x, x + w);
-      const top = Math.min(y, y + h);
-      const bottom = Math.max(y, y + h);
-      return pos.x >= left - threshold && pos.x <= right + threshold && pos.y >= top - threshold && pos.y <= bottom + threshold;
-    }
-    
-    if (el.type === 'circle') {
-      const dist = Math.sqrt(Math.pow(pos.x - (el.x || 0), 2) + Math.pow(pos.y - (el.y || 0), 2));
-      return dist <= Math.abs(el.radius || 0) + threshold;
-    }
-    
+  const getElementBounds = (el: VectorElement): BoundingBox => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
     if (el.type === 'path' && el.points) {
-      for (let i = 0; i < el.points.length - 1; i++) {
-        const p1 = el.points[i];
-        const p2 = el.points[i+1];
-        const A = pos.x - p1.x;
-        const B = pos.y - p1.y;
-        const C = p2.x - p1.x;
-        const D = p2.y - p1.y;
-        const dot = A * C + B * D;
-        const lenSq = C * C + D * D;
-        let param = -1;
-        if (lenSq !== 0) param = dot / lenSq;
-        let xx, yy;
-        if (param < 0) {
-          xx = p1.x; yy = p1.y;
-        } else if (param > 1) {
-          xx = p2.x; yy = p2.y;
-        } else {
-          xx = p1.x + param * C;
-          yy = p1.y + param * D;
-        }
-        const dist = Math.sqrt(Math.pow(pos.x - xx, 2) + Math.pow(pos.y - yy, 2));
-        if (dist < threshold) return true;
-      }
-      return false;
-    }
-    
-    if (el.type === 'text') {
+      el.points.forEach(p => {
+        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+      });
+    } else if (el.type === 'rect') {
+      const x = el.x || 0; const y = el.y || 0;
+      const w = el.width || 0; const h = el.height || 0;
+      minX = Math.min(x, x + w); maxX = Math.max(x, x + w);
+      minY = Math.min(y, y + h); maxY = Math.max(y, y + h);
+    } else if (el.type === 'circle' || el.type === 'polygon' || el.type === 'triangle') {
+      const size = el.type === 'circle' ? (el.radius || 0) : (el.width || el.radius || 0) / (el.type === 'triangle' ? 1.5 : 1);
+      const r = Math.abs(size);
+      minX = (el.x || 0) - r; maxX = (el.x || 0) + r;
+      minY = (el.y || 0) - r; maxY = (el.y || 0) + r;
+    } else if (el.type === 'text') {
       const fontSize = el.fontSize || 24;
-      const width = (el.text?.length || 0) * (fontSize * 0.5);
-      return pos.x >= (el.x || 0) && pos.x <= (el.x || 0) + width && pos.y >= (el.y || 0) - fontSize && pos.y <= (el.y || 0);
-    }
-    
-    if (el.type === 'triangle' || el.type === 'polygon') {
-      const dist = Math.sqrt(Math.pow(pos.x - (el.x || 0), 2) + Math.pow(pos.y - (el.y || 0), 2));
-      const size = el.type === 'triangle' ? (el.width || 0) / 2 : (el.radius || 0);
-      return dist <= Math.abs(size) + threshold;
+      const width = (el.text?.length || 0) * (fontSize * 0.6);
+      minX = el.x || 0; maxX = (el.x || 0) + width;
+      minY = (el.y || 0) - fontSize; maxY = el.y || 0;
     }
 
-    return false;
+    return {
+      minX, minY, maxX, maxY,
+      width: maxX - minX,
+      height: maxY - minY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2
+    };
+  };
+
+  const selectedElement = useMemo(() => 
+    elements.find(el => el.id === selectedElementId),
+    [elements, selectedElementId]
+  );
+
+  const isPointInElement = (pos: Point, el: VectorElement): boolean => {
+    const threshold = 10;
+    const bounds = getElementBounds(el);
+    return pos.x >= bounds.minX - threshold && pos.x <= bounds.maxX + threshold &&
+           pos.y >= bounds.minY - threshold && pos.y <= bounds.maxY + threshold;
+  };
+
+  const getHandleAtPos = (pos: Point, bounds: BoundingBox): HandleId | null => {
+    const handles: Record<HandleId, Point> = {
+      nw: { x: bounds.minX, y: bounds.minY },
+      n:  { x: bounds.centerX, y: bounds.minY },
+      ne: { x: bounds.maxX, y: bounds.minY },
+      w:  { x: bounds.minX, y: bounds.centerY },
+      e:  { x: bounds.maxX, y: bounds.centerY },
+      sw: { x: bounds.minX, y: bounds.maxY },
+      s:  { x: bounds.centerX, y: bounds.maxY },
+      se: { x: bounds.maxX, y: bounds.maxY },
+      rotate: { x: bounds.centerX, y: bounds.minY - ROTATE_HANDLE_OFFSET },
+    };
+
+    for (const [id, p] of Object.entries(handles)) {
+      const dist = Math.sqrt(Math.pow(pos.x - p.x, 2) + Math.pow(pos.y - p.y, 2));
+      if (dist <= HANDLE_SIZE + 4) return id as HandleId;
+    }
+    return null;
   };
 
   const render = useCallback(() => {
@@ -122,6 +134,16 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     const allElements = currentElement ? [...elements, currentElement] : elements;
 
     allElements.forEach((el) => {
+      ctx.save();
+      const bounds = getElementBounds(el);
+      
+      // Apply rotation if any
+      if (el.rotation) {
+        ctx.translate(bounds.centerX, bounds.centerY);
+        ctx.rotate(el.rotation);
+        ctx.translate(-bounds.centerX, -bounds.centerY);
+      }
+
       ctx.beginPath();
       ctx.strokeStyle = el.color;
       ctx.fillStyle = el.color;
@@ -141,26 +163,20 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         ctx.arc(el.x || 0, el.y || 0, Math.abs(el.radius || 0), 0, Math.PI * 2);
         ctx.stroke();
       } else if (el.type === 'triangle') {
-        const x = el.x || 0;
-        const y = el.y || 0;
-        const w = el.width || 0;
-        const h = el.height || 0;
+        const x = el.x || 0; const y = el.y || 0;
+        const w = el.width || 0; const h = el.height || 0;
         ctx.moveTo(x, y - h / 2);
         ctx.lineTo(x - w / 2, y + h / 2);
         ctx.lineTo(x + w / 2, y + h / 2);
         ctx.closePath();
         ctx.stroke();
       } else if (el.type === 'polygon') {
-        const sides = 6;
+        const sides = el.sides || 6;
         const r = Math.abs(el.radius || 0);
-        const x = el.x || 0;
-        const y = el.y || 0;
+        const x = el.x || 0; const y = el.y || 0;
         for (let i = 0; i <= sides; i++) {
           const angle = (i * 2 * Math.PI) / sides;
-          const px = x + r * Math.cos(angle);
-          const py = y + r * Math.sin(angle);
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+          ctx.lineTo(x + r * Math.cos(angle), y + r * Math.sin(angle));
         }
         ctx.stroke();
       } else if (el.type === 'text' && el.text) {
@@ -168,39 +184,46 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         ctx.fillText(el.text, el.x || 0, el.y || 0);
       }
 
+      // Render Selection UI
       if (selectedElementId === el.id && appMode === 'sketch') {
-        ctx.save();
+        ctx.strokeStyle = '#806CE0';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.strokeRect(bounds.minX - 5, bounds.minY - 5, bounds.width + 10, bounds.height + 10);
+        
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#806CE0';
         ctx.lineWidth = 2;
-        ctx.setLineDash([6, 4]);
-        
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        if (el.type === 'path' && el.points) {
-          el.points.forEach(p => {
-            minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-          });
-        } else if (el.type === 'rect') {
-          minX = Math.min(el.x || 0, (el.x || 0) + (el.width || 0));
-          minY = Math.min(el.y || 0, (el.y || 0) + (el.height || 0));
-          maxX = Math.max(el.x || 0, (el.x || 0) + (el.width || 0));
-          maxY = Math.max(el.y || 0, (el.y || 0) + (el.height || 0));
-        } else if (el.type === 'circle' || el.type === 'polygon' || el.type === 'triangle') {
-          const size = el.type === 'rect' ? 0 : (el.radius || el.width || 0) / (el.type === 'triangle' ? 1 : 1);
-          minX = (el.x || 0) - Math.abs(size);
-          minY = (el.y || 0) - Math.abs(size);
-          maxX = (el.x || 0) + Math.abs(size);
-          maxY = (el.y || 0) + Math.abs(size);
-        } else if (el.type === 'text') {
-           minX = el.x || 0; minY = (el.y || 0) - 24;
-           maxX = minX + 100; maxY = el.y || 0;
-        }
-        
-        if (minX !== Infinity) {
-          ctx.strokeRect(minX - 10, minY - 10, (maxX - minX) + 20, (maxY - minY) + 20);
-        }
-        ctx.restore();
+
+        const handlePoints = [
+          { x: bounds.minX - 5, y: bounds.minY - 5 },
+          { x: bounds.centerX, y: bounds.minY - 5 },
+          { x: bounds.maxX + 5, y: bounds.minY - 5 },
+          { x: bounds.minX - 5, y: bounds.centerY },
+          { x: bounds.maxX + 5, y: bounds.centerY },
+          { x: bounds.minX - 5, y: bounds.maxY + 5 },
+          { x: bounds.centerX, y: bounds.maxY + 5 },
+          { x: bounds.maxX + 5, y: bounds.maxY + 5 },
+        ];
+
+        handlePoints.forEach(p => {
+          ctx.fillRect(p.x - HANDLE_SIZE/2, p.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+          ctx.strokeRect(p.x - HANDLE_SIZE/2, p.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+        });
+
+        // Rotation handle
+        const rotP = { x: bounds.centerX, y: bounds.minY - ROTATE_HANDLE_OFFSET };
+        ctx.beginPath();
+        ctx.moveTo(bounds.centerX, bounds.minY - 5);
+        ctx.lineTo(rotP.x, rotP.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(rotP.x, rotP.y, HANDLE_SIZE/2 + 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
+      ctx.restore();
     });
   }, [elements, currentElement, selectedElementId, appMode]);
 
@@ -228,12 +251,24 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     setLastPos(pos);
     
     if (activeTool === 'select') {
+      if (selectedElement) {
+        const bounds = getElementBounds(selectedElement);
+        const handle = getHandleAtPos(pos, bounds);
+        if (handle) {
+          setTransformType(handle === 'rotate' ? 'rotate' : 'resize');
+          setActiveHandle(handle);
+          setInitialTransformState({ ...selectedElement, bounds });
+          return;
+        }
+      }
+
       const hit = [...elements].reverse().find(el => isPointInElement(pos, el));
       if (hit) {
         setSelectedElementId(hit.id);
-        setIsDragging(true);
+        setTransformType('move');
       } else {
         setSelectedElementId(null);
+        setTransformType('none');
       }
       return;
     }
@@ -262,14 +297,52 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     const dx = pos.x - lastPos.x;
     const dy = pos.y - lastPos.y;
 
-    if (isDragging && selectedElementId && activeTool === 'select') {
+    if (transformType !== 'none' && selectedElementId) {
       setElements(prev => prev.map(el => {
-        if (el.id === selectedElementId) {
+        if (el.id !== selectedElementId) return el;
+
+        if (transformType === 'move') {
           if (el.type === 'path' && el.points) {
             return { ...el, points: el.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
           }
           return { ...el, x: (el.x || 0) + dx, y: (el.y || 0) + dy };
         }
+
+        if (transformType === 'resize' && activeHandle && initialTransformState) {
+          const bounds = initialTransformState.bounds as BoundingBox;
+          let newWidth = el.width || 0;
+          let newHeight = el.height || 0;
+          let newX = el.x || 0;
+          let newY = el.y || 0;
+
+          if (activeHandle.includes('e')) newWidth += dx;
+          if (activeHandle.includes('w')) { newWidth -= dx; newX += dx; }
+          if (activeHandle.includes('s')) newHeight += dy;
+          if (activeHandle.includes('n')) { newHeight -= dy; newY += dy; }
+
+          if (el.type === 'path' && el.points) {
+            const scaleX = (bounds.width + dx) / bounds.width;
+            const scaleY = (bounds.height + dy) / bounds.height;
+            // Simplified path scaling relative to top-left of bounds
+            return {
+              ...el,
+              points: el.points.map(p => ({
+                x: bounds.minX + (p.x - bounds.minX) * (activeHandle.includes('e') ? scaleX : 1),
+                y: bounds.minY + (p.y - bounds.minY) * (activeHandle.includes('s') ? scaleY : 1),
+              }))
+            };
+          }
+
+          if (el.type === 'circle') return { ...el, radius: Math.abs(newWidth / 2) };
+          return { ...el, x: newX, y: newY, width: newWidth, height: newHeight };
+        }
+
+        if (transformType === 'rotate') {
+          const bounds = getElementBounds(el);
+          const angle = Math.atan2(pos.y - bounds.centerY, pos.x - bounds.centerX) + Math.PI/2;
+          return { ...el, rotation: angle };
+        }
+
         return el;
       }));
     } else if (currentElement) {
@@ -277,15 +350,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         setCurrentElement({ ...currentElement, points: [...(currentElement.points || []), pos] });
       } else if (currentElement.type === 'rect') {
         setCurrentElement({ ...currentElement, width: pos.x - (currentElement.x || 0), height: pos.y - (currentElement.y || 0) });
-      } else if (currentElement.type === 'circle' || currentElement.type === 'polygon') {
+      } else if (currentElement.type === 'circle') {
         const radius = Math.sqrt(Math.pow(pos.x - (currentElement.x || 0), 2) + Math.pow(pos.y - (currentElement.y || 0), 2));
         setCurrentElement({ ...currentElement, radius });
-      } else if (currentElement.type === 'triangle') {
-        setCurrentElement({ 
-          ...currentElement, 
-          width: Math.abs(pos.x - (currentElement.x || 0)) * 2, 
-          height: Math.abs(pos.y - (currentElement.y || 0)) * 2 
-        });
       }
     }
     setLastPos(pos);
@@ -296,7 +363,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       setElements(prev => [...prev, currentElement]);
       setCurrentElement(null);
     }
-    setIsDragging(false);
+    setTransformType('none');
+    setActiveHandle(null);
   };
 
   return (
@@ -332,10 +400,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           <p className="text-primary font-medium tracking-widest uppercase text-sm">Synthesizing Motion...</p>
         </div>
       )}
-
-      <div className="absolute top-4 left-4 text-[10px] text-white/30 uppercase tracking-[0.2em] pointer-events-none font-bold">
-        {appMode === 'sketch' ? `${activeTool.toUpperCase()} MODE` : 'MOTION PREVIEW'}
-      </div>
     </div>
   );
 };
