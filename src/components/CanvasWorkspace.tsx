@@ -32,8 +32,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const [elements, setElements] = useState<VectorElement[]>([]);
   const [currentElement, setCurrentElement] = useState<VectorElement | null>(null);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  
+  // Dragging state for transformation
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStartPos, setDragStartPos] = useState<Point>({ x: 0, y: 0 });
+  const [lastPos, setLastPos] = useState<Point>({ x: 0, y: 0 });
 
   const getPointerPos = (e: React.PointerEvent | PointerEvent): Point => {
     const canvas = canvasRef.current;
@@ -46,6 +48,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   };
 
   const isPointInElement = (pos: Point, el: VectorElement): boolean => {
+    const threshold = 12; // Click tolerance
+    
     if (el.type === 'rect') {
       const x = el.x || 0;
       const y = el.y || 0;
@@ -55,35 +59,53 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       const right = Math.max(x, x + w);
       const top = Math.min(y, y + h);
       const bottom = Math.max(y, y + h);
-      return pos.x >= left && pos.x <= right && pos.y >= top && pos.y <= bottom;
+      return pos.x >= left - threshold && pos.x <= right + threshold && pos.y >= top - threshold && pos.y <= bottom + threshold;
     }
+    
     if (el.type === 'circle') {
       const dist = Math.sqrt(Math.pow(pos.x - (el.x || 0), 2) + Math.pow(pos.y - (el.y || 0), 2));
-      return dist <= Math.abs(el.radius || 0);
+      return dist <= Math.abs(el.radius || 0) + threshold;
     }
+    
     if (el.type === 'path' && el.points) {
-      const xs = el.points.map(p => p.x);
-      const ys = el.points.map(p => p.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      return pos.x >= minX - 5 && pos.x <= maxX + 5 && pos.y >= minY - 5 && pos.y <= maxY + 5;
+      for (let i = 0; i < el.points.length - 1; i++) {
+        const p1 = el.points[i];
+        const p2 = el.points[i+1];
+        const A = pos.x - p1.x;
+        const B = pos.y - p1.y;
+        const C = p2.x - p1.x;
+        const D = p2.y - p1.y;
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+        if (lenSq !== 0) param = dot / lenSq;
+        let xx, yy;
+        if (param < 0) {
+          xx = p1.x; yy = p1.y;
+        } else if (param > 1) {
+          xx = p2.x; yy = p2.y;
+        } else {
+          xx = p1.x + param * C;
+          yy = p1.y + param * D;
+        }
+        const dist = Math.sqrt(Math.pow(pos.x - xx, 2) + Math.pow(pos.y - yy, 2));
+        if (dist < threshold) return true;
+      }
+      return false;
     }
+    
     if (el.type === 'text') {
-       return pos.x >= (el.x || 0) && pos.x <= (el.x || 0) + 100 && pos.y >= (el.y || 0) - 24 && pos.y <= (el.y || 0);
+      const fontSize = el.fontSize || 24;
+      const width = (el.text?.length || 0) * (fontSize * 0.5);
+      return pos.x >= (el.x || 0) && pos.x <= (el.x || 0) + width && pos.y >= (el.y || 0) - fontSize && pos.y <= (el.y || 0);
     }
-    if (el.type === 'triangle') {
-      const x = el.x || 0;
-      const y = el.y || 0;
-      const w = el.width || 0;
-      const h = el.height || 0;
-      return pos.x >= x - w/2 && pos.x <= x + w/2 && pos.y >= y - h/2 && pos.y <= y + h/2;
-    }
-    if (el.type === 'polygon') {
+    
+    if (el.type === 'triangle' || el.type === 'polygon') {
       const dist = Math.sqrt(Math.pow(pos.x - (el.x || 0), 2) + Math.pow(pos.y - (el.y || 0), 2));
-      return dist <= Math.abs(el.radius || 0);
+      const size = el.type === 'triangle' ? (el.width || 0) / 2 : (el.radius || 0);
+      return dist <= Math.abs(size) + threshold;
     }
+
     return false;
   };
 
@@ -93,9 +115,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    ctx.save();
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
     const allElements = currentElement ? [...elements, currentElement] : elements;
@@ -143,41 +164,49 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         }
         ctx.stroke();
       } else if (el.type === 'text' && el.text) {
-        ctx.font = `${el.fontSize || 24}px Inter, sans-serif`;
+        ctx.font = `600 ${el.fontSize || 24}px Inter, sans-serif`;
         ctx.fillText(el.text, el.x || 0, el.y || 0);
       }
 
       if (selectedElementId === el.id && appMode === 'sketch') {
         ctx.save();
         ctx.strokeStyle = '#806CE0';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 5]);
-        // Simple bounding box for selection
-        if (el.type === 'rect') {
-          ctx.strokeRect((el.x || 0) - 5, (el.y || 0) - 5, (el.width || 0) + 10, (el.height || 0) + 10);
-        } else if (el.type === 'circle' || el.type === 'polygon') {
-          const r = Math.abs(el.radius || 0);
-          ctx.strokeRect((el.x || 0) - r - 5, (el.y || 0) - r - 5, (r * 2) + 10, (r * 2) + 10);
-        } else if (el.type === 'path' && el.points) {
-          const xs = el.points.map(p => p.x);
-          const ys = el.points.map(p => p.y);
-          const minX = Math.min(...xs);
-          const maxX = Math.max(...xs);
-          const minY = Math.min(...ys);
-          const maxY = Math.max(...ys);
-          ctx.strokeRect(minX - 5, minY - 5, (maxX - minX) + 10, (maxY - minY) + 10);
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        if (el.type === 'path' && el.points) {
+          el.points.forEach(p => {
+            minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+          });
+        } else if (el.type === 'rect') {
+          minX = Math.min(el.x || 0, (el.x || 0) + (el.width || 0));
+          minY = Math.min(el.y || 0, (el.y || 0) + (el.height || 0));
+          maxX = Math.max(el.x || 0, (el.x || 0) + (el.width || 0));
+          maxY = Math.max(el.y || 0, (el.y || 0) + (el.height || 0));
+        } else if (el.type === 'circle' || el.type === 'polygon' || el.type === 'triangle') {
+          const size = el.type === 'rect' ? 0 : (el.radius || el.width || 0) / (el.type === 'triangle' ? 1 : 1);
+          minX = (el.x || 0) - Math.abs(size);
+          minY = (el.y || 0) - Math.abs(size);
+          maxX = (el.x || 0) + Math.abs(size);
+          maxY = (el.y || 0) + Math.abs(size);
+        } else if (el.type === 'text') {
+           minX = el.x || 0; minY = (el.y || 0) - 24;
+           maxX = minX + 100; maxY = el.y || 0;
+        }
+        
+        if (minX !== Infinity) {
+          ctx.strokeRect(minX - 10, minY - 10, (maxX - minX) + 20, (maxY - minY) + 20);
         }
         ctx.restore();
       }
     });
-
-    ctx.restore();
   }, [elements, currentElement, selectedElementId, appMode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const resize = () => {
       const container = containerRef.current;
       if (!container) return;
@@ -186,58 +215,54 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       canvas.height = height * window.devicePixelRatio;
       render();
     };
-
     window.addEventListener('resize', resize);
     resize();
     return () => window.removeEventListener('resize', resize);
   }, [render]);
 
-  useEffect(() => {
-    render();
-  }, [render, elements, currentElement]);
+  useEffect(() => { render(); }, [render, elements, currentElement]);
 
-  const startDrawing = (e: React.PointerEvent) => {
+  const handlePointerDown = (e: React.PointerEvent) => {
     if (appMode !== 'sketch') return;
     const pos = getPointerPos(e);
-    const id = Math.random().toString(36).substr(2, 9);
-
+    setLastPos(pos);
+    
     if (activeTool === 'select') {
       const hit = [...elements].reverse().find(el => isPointInElement(pos, el));
       if (hit) {
         setSelectedElementId(hit.id);
         setIsDragging(true);
-        setDragStartPos(pos);
       } else {
         setSelectedElementId(null);
       }
-    } else if (activeTool === 'pen') {
+      return;
+    }
+
+    const id = Math.random().toString(36).substr(2, 9);
+    if (activeTool === 'pen') {
       setCurrentElement({ id, type: 'path', points: [pos], color: primaryColor });
     } else if (activeTool === 'shape') {
       const type = activeShape as VectorElementType;
       setCurrentElement({ id, type, x: pos.x, y: pos.y, width: 0, height: 0, radius: 0, color: primaryColor });
     } else if (activeTool === 'eraser') {
-      setElements(prev => prev.filter(el => !isPointInElement(pos, el)));
+      const hit = [...elements].reverse().find(el => isPointInElement(pos, el));
+      if (hit) setElements(prev => prev.filter(el => el.id !== hit.id));
     } else if (activeTool === 'fill') {
       const hit = [...elements].reverse().find(el => isPointInElement(pos, el));
-      if (hit) {
-        setElements(prev => prev.map(el => el.id === hit.id ? { ...el, color: primaryColor } : el));
-      }
+      if (hit) setElements(prev => prev.map(el => el.id === hit.id ? { ...el, color: primaryColor } : el));
     } else if (activeTool === 'text') {
       const text = prompt("Enter text:");
-      if (text) {
-        setElements(prev => [...prev, { id, type: 'text', x: pos.x, y: pos.y, text, fontSize: 24, color: primaryColor }]);
-      }
+      if (text) setElements(prev => [...prev, { id, type: 'text', x: pos.x, y: pos.y, text, fontSize: 24, color: primaryColor }]);
     }
   };
 
-  const draw = (e: React.PointerEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
     if (appMode !== 'sketch') return;
     const pos = getPointerPos(e);
+    const dx = pos.x - lastPos.x;
+    const dy = pos.y - lastPos.y;
 
     if (isDragging && selectedElementId && activeTool === 'select') {
-      const dx = pos.x - dragStartPos.x;
-      const dy = pos.y - dragStartPos.y;
-      
       setElements(prev => prev.map(el => {
         if (el.id === selectedElementId) {
           if (el.type === 'path' && el.points) {
@@ -247,7 +272,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         }
         return el;
       }));
-      setDragStartPos(pos);
     } else if (currentElement) {
       if (currentElement.type === 'path') {
         setCurrentElement({ ...currentElement, points: [...(currentElement.points || []), pos] });
@@ -264,9 +288,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         });
       }
     }
+    setLastPos(pos);
   };
 
-  const endDrawing = () => {
+  const handlePointerUp = () => {
     if (currentElement) {
       setElements(prev => [...prev, currentElement]);
       setCurrentElement(null);
@@ -282,10 +307,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     >
       <canvas
         ref={canvasRef}
-        onPointerDown={startDrawing}
-        onPointerMove={draw}
-        onPointerUp={endDrawing}
-        onPointerLeave={endDrawing}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
         className={cn(
           "w-full h-full transition-opacity duration-500",
           appMode === 'motion' ? "opacity-30 pointer-events-none" : "opacity-100",
