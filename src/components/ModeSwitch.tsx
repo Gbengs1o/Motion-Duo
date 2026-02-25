@@ -3,14 +3,22 @@
 import React from 'react';
 import { AppMode } from '@/app/lib/motion-duo-types';
 import { cn } from '@/lib/utils';
-import { Edit3, Activity, Settings, HelpCircle, Share2 } from 'lucide-react';
+import { Edit3, Activity, Settings, HelpCircle, Share2, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ModeSwitchProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
+  isSidePanelOpen?: boolean;
+  onToggleSidePanel?: () => void;
 }
 
-export const ModeSwitch: React.FC<ModeSwitchProps> = ({ mode, setMode }) => {
+export const ModeSwitch: React.FC<ModeSwitchProps> = ({ 
+  mode, 
+  setMode,
+  isSidePanelOpen,
+  onToggleSidePanel 
+}) => {
   return (
     <div className="h-14 bg-[#232326] border-b border-white/5 flex items-center justify-between px-4 md:px-6 shrink-0 z-50">
       <div className="flex items-center gap-4">
@@ -58,6 +66,24 @@ export const ModeSwitch: React.FC<ModeSwitchProps> = ({ mode, setMode }) => {
         <button className="p-2 text-white/40 hover:text-white transition-colors hidden sm:block">
           <Settings className="w-4 h-4" />
         </button>
+        
+        {/* Side Panel Toggle for Tablet/Desktop */}
+        <div className="hidden md:block h-4 w-px bg-white/10 mx-1" />
+        
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button 
+              onClick={onToggleSidePanel}
+              className="hidden md:flex p-2 text-white/40 hover:text-white transition-colors"
+            >
+              {isSidePanelOpen ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p className="text-xs">{isSidePanelOpen ? 'Hide Side Panel' : 'Show Side Panel'}</p>
+          </TooltipContent>
+        </Tooltip>
+
         <button className="p-2 text-white/40 hover:text-white transition-colors hidden sm:block">
           <HelpCircle className="w-4 h-4" />
         </button>

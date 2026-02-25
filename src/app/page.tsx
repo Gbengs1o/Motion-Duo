@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Layers as LayersIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export default function MotionDuoApp() {
   const [appMode, setAppMode] = useState<AppMode>('sketch');
@@ -20,6 +21,7 @@ export default function MotionDuoApp() {
   const [description, setDescription] = useState('');
   const [motionHtml, setMotionHtml] = useState<string | null>(null);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(true);
   const { toast } = useToast();
 
   const [layers, setLayers] = useState<Layer[]>([
@@ -83,7 +85,12 @@ export default function MotionDuoApp() {
 
   return (
     <div className="flex flex-col h-[100dvh] w-screen overflow-hidden text-foreground bg-background">
-      <ModeSwitch mode={appMode} setMode={handleModeToggle} />
+      <ModeSwitch 
+        mode={appMode} 
+        setMode={handleModeToggle} 
+        isSidePanelOpen={isSidePanelOpen}
+        onToggleSidePanel={() => setIsSidePanelOpen(!isSidePanelOpen)}
+      />
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Desktop Toolbox */}
@@ -144,15 +151,22 @@ export default function MotionDuoApp() {
         </main>
 
         {/* Desktop Side Panel */}
-        <SidePanel 
-          description={description}
-          setDescription={setDescription}
-          layers={layers}
-          onToggleVisibility={handleToggleVisibility}
-          onToggleLock={handleToggleLock}
-          onImport={() => setIsMediaModalOpen(true)}
-          className="hidden md:flex w-[320px] h-full bg-[#232326] border-l border-white/5 flex-col shrink-0"
-        />
+        <div 
+          className={cn(
+            "hidden md:flex flex-col h-full bg-[#232326] border-l border-white/5 transition-all duration-300 ease-in-out shrink-0 overflow-hidden",
+            isSidePanelOpen ? "w-[320px]" : "w-0 border-l-0"
+          )}
+        >
+          <SidePanel 
+            description={description}
+            setDescription={setDescription}
+            layers={layers}
+            onToggleVisibility={handleToggleVisibility}
+            onToggleLock={handleToggleLock}
+            onImport={() => setIsMediaModalOpen(true)}
+            className="w-[320px] h-full flex flex-col"
+          />
+        </div>
       </div>
 
       <MediaModal 
