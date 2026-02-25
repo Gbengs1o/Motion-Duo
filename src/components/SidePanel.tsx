@@ -54,14 +54,27 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 }) => {
   return (
     <div className={className || "w-[320px] h-full bg-[#232326] border-l border-white/5 flex flex-col shrink-0"}>
-      <Tabs defaultValue="layers" className="w-full flex flex-col h-full">
+      <Tabs defaultValue="text" className="w-full flex flex-col h-full">
         <TabsList className="grid w-full grid-cols-3 bg-transparent p-0 h-14 border-b border-white/5 rounded-none">
+          <TabsTrigger value="text" className="data-[state=active]:bg-white/5 rounded-none h-full text-[10px] uppercase tracking-tighter">Description</TabsTrigger>
           <TabsTrigger value="layers" className="data-[state=active]:bg-white/5 rounded-none h-full text-[10px] uppercase tracking-tighter">Layers</TabsTrigger>
-          <TabsTrigger value="text" className="data-[state=active]:bg-white/5 rounded-none h-full text-[10px] uppercase tracking-tighter">Prompt</TabsTrigger>
           <TabsTrigger value="media" className="data-[state=active]:bg-white/5 rounded-none h-full text-[10px] uppercase tracking-tighter">Media</TabsTrigger>
         </TabsList>
 
         <div className="flex-1 overflow-hidden">
+          <TabsContent value="text" className="h-full m-0 p-4 space-y-4 flex flex-col">
+            <div className="space-y-1">
+              <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Description</h3>
+              <p className="text-[11px] text-white/50 leading-relaxed">Describe the motion, physics, and interactions of your sketch. Switching to Motion mode will trigger synthesis.</p>
+            </div>
+            <Textarea 
+              placeholder="e.g. The circle bounces against the walls like a bubble, changing colors as it hits..."
+              className="flex-1 bg-black/20 border-white/5 focus-visible:ring-primary pro-scrollbar resize-none text-sm"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </TabsContent>
+
           <TabsContent value="layers" className="h-full m-0 flex flex-col p-4">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Active Layers</h3>
@@ -153,19 +166,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 ))}
               </div>
             </ScrollArea>
-          </TabsContent>
-
-          <TabsContent value="text" className="h-full m-0 p-4 space-y-4 flex flex-col">
-            <div className="space-y-1">
-              <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Description</h3>
-              <p className="text-[11px] text-white/50 leading-relaxed">Describe the motion, physics, and interactions of your sketch. Switching to Motion mode will trigger synthesis.</p>
-            </div>
-            <Textarea 
-              placeholder="e.g. The circle bounces against the walls like a bubble, changing colors as it hits..."
-              className="flex-1 bg-black/20 border-white/5 focus-visible:ring-primary pro-scrollbar resize-none text-sm"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
           </TabsContent>
 
           <TabsContent value="media" className="h-full m-0 p-4 flex flex-col items-center justify-center space-y-4">
