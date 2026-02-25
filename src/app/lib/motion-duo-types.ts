@@ -14,3 +14,25 @@ export interface MediaAsset {
   url: string;
   type: 'image' | 'svg';
 }
+
+export type VectorElementType = 'path' | 'rect' | 'circle' | 'triangle' | 'polygon' | 'text';
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface VectorElement {
+  id: string;
+  type: VectorElementType;
+  points?: Point[]; // For paths
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  radius?: number;
+  color: string;
+  text?: string;
+  fontSize?: number;
+  sides?: number; // For polygons
+}

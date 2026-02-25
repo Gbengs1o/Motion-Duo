@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState } from 'react';
@@ -46,7 +45,7 @@ export default function MotionDuoApp() {
 
   const triggerMotionSynthesis = async () => {
     const canvas = document.querySelector('canvas');
-    const dataUri = canvas?.toDataURL('image/png') || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const dataUri = canvas?.toDataURL('image/png') || '';
     
     setIsLoading(true);
     setAppMode('motion');
@@ -101,7 +100,6 @@ export default function MotionDuoApp() {
       />
 
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Desktop Toolbox */}
         <Toolbox 
           className="hidden md:flex w-16 h-full bg-[#232326] border-r border-white/5 flex-col items-center py-6 gap-6 shrink-0" 
           activeTool={activeTool}
@@ -122,6 +120,7 @@ export default function MotionDuoApp() {
             onUndo={() => {}} 
             onRedo={() => {}}
             activeTool={activeTool}
+            activeShape={activeShape}
             primaryColor={primaryColor}
             canvasColor={canvasColor}
           />
@@ -131,7 +130,6 @@ export default function MotionDuoApp() {
             onRedo={() => {}} 
           />
 
-          {/* Mobile floating tool triggers */}
           <div className="absolute top-4 right-4 flex flex-col gap-2 md:hidden">
             <Sheet>
               <SheetTrigger asChild>
@@ -181,7 +179,6 @@ export default function MotionDuoApp() {
           </div>
         </main>
 
-        {/* Desktop Side Panel */}
         <div 
           className={cn(
             "hidden md:flex flex-col h-full bg-[#232326] border-l border-white/5 transition-all duration-300 ease-in-out shrink-0 overflow-hidden",
