@@ -36,6 +36,7 @@ export interface VectorElement {
   text?: string;
   fontSize?: number;
   sides?: number; // For polygons
+  layerId: string;
 }
 
 export interface BoundingBox {

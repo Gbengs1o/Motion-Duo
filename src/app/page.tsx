@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
-import { AppMode, Layer } from '@/app/lib/motion-duo-types';
+import React, { useState, useCallback } from 'react';
+import { AppMode, Layer, VectorElement } from '@/app/lib/motion-duo-types';
 import { ModeSwitch } from '@/components/ModeSwitch';
 import { Toolbox } from '@/components/Toolbox';
 import { CanvasWorkspace } from '@/components/CanvasWorkspace';
@@ -29,11 +29,13 @@ export default function MotionDuoApp() {
   const [primaryColor, setPrimaryColor] = useState('#806CE0');
   const [canvasColor, setCanvasColor] = useState('#121214');
 
-  const { toast } = useToast();
-
+  const [elements, setElements] = useState<VectorElement[]>([]);
   const [layers, setLayers] = useState<Layer[]>([
-    { id: 'l1', name: 'Vector Layer 1', type: 'sketch', visible: true, locked: false },
+    { id: 'l1', name: 'Background Layer', type: 'sketch', visible: true, locked: false },
   ]);
+  const [activeLayerId, setActiveLayerId] = useState<string>('l1');
+
+  const { toast } = useToast();
 
   const handleModeToggle = (mode: AppMode) => {
     if (mode === 'motion' && appMode === 'sketch') {
@@ -75,15 +77,87 @@ export default function MotionDuoApp() {
     setLayers(prev => prev.map(l => l.id === id ? { ...l, locked: !l.locked } : l));
   };
 
-  const handleImportConfirm = (name: string) => {
+  const handleAddLayer = () => {
+    const id = `l-${Math.random().toString(36).substr(2, 9)}`;
     const newLayer: Layer = {
-      id: Math.random().toString(36).substr(2, 9),
+      id,
+      name: `Layer ${layers.length + 1}`,
+      type: 'sketch',
+      visible: true,
+      locked: false,
+    };
+    setLayers(prev => [newLayer, ...prev]);
+    setActiveLayerId(id);
+  };
+
+  const handleDeleteLayer = (id: string) => {
+    if (layers.length <= 1) {
+      toast({ title: "Operation Denied", description: "You must have at least one layer." });
+      return;
+    }
+    setLayers(prev => prev.filter(l => l.id !== id));
+    setElements(prev => prev.filter(el => el.layerId !== id));
+    if (activeLayerId === id) {
+      setActiveLayerId(layers.find(l => l.id !== id)?.id || '');
+    }
+  };
+
+  const handleDuplicateLayer = (id: string) => {
+    const source = layers.find(l => l.id === id);
+    if (!source) return;
+
+    const newId = `l-${Math.random().toString(36).substr(2, 9)}`;
+    const newLayer: Layer = {
+      ...source,
+      id: newId,
+      name: `${source.name} Copy`,
+    };
+
+    const sourceElements = elements.filter(el => el.layerId === id);
+    const duplicatedElements = sourceElements.map(el => ({
+      ...el,
+      id: `el-${Math.random().toString(36).substr(2, 9)}`,
+      layerId: newId,
+      x: (el.x || 0) + 10,
+      y: (el.y || 0) + 10,
+      points: el.points?.map(p => ({ x: p.x + 10, y: p.y + 10 }))
+    }));
+
+    setLayers(prev => {
+      const idx = prev.findIndex(l => l.id === id);
+      const next = [...prev];
+      next.splice(idx, 0, newLayer);
+      return next;
+    });
+    setElements(prev => [...prev, ...duplicatedElements]);
+    setActiveLayerId(newId);
+  };
+
+  const handleMoveLayer = (id: string, direction: 'up' | 'down') => {
+    setLayers(prev => {
+      const idx = prev.findIndex(l => l.id === id);
+      if (idx === -1) return prev;
+      if (direction === 'up' && idx === 0) return prev;
+      if (direction === 'down' && idx === prev.length - 1) return prev;
+
+      const next = [...prev];
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+      return next;
+    });
+  };
+
+  const handleImportConfirm = (name: string) => {
+    const id = `l-${Math.random().toString(36).substr(2, 9)}`;
+    const newLayer: Layer = {
+      id,
       name,
       type: 'image',
       visible: true,
       locked: false,
     };
-    setLayers(prev => [...prev, newLayer]);
+    setLayers(prev => [newLayer, ...prev]);
+    setActiveLayerId(id);
     toast({
       title: "Asset Imported",
       description: `${name} has been added to your layers.`,
@@ -117,12 +191,14 @@ export default function MotionDuoApp() {
             appMode={appMode} 
             isLoading={isLoading} 
             motionHtml={motionHtml}
-            onUndo={() => {}} 
-            onRedo={() => {}}
             activeTool={activeTool}
             activeShape={activeShape}
             primaryColor={primaryColor}
             canvasColor={canvasColor}
+            elements={elements}
+            setElements={setElements}
+            layers={layers}
+            activeLayerId={activeLayerId}
           />
           <BottomControls 
             appMode={appMode} 
@@ -145,8 +221,14 @@ export default function MotionDuoApp() {
                   description={description}
                   setDescription={setDescription}
                   layers={layers}
+                  activeLayerId={activeLayerId}
+                  setActiveLayerId={setActiveLayerId}
                   onToggleVisibility={handleToggleVisibility}
                   onToggleLock={handleToggleLock}
+                  onAddLayer={handleAddLayer}
+                  onDeleteLayer={handleDeleteLayer}
+                  onDuplicateLayer={handleDuplicateLayer}
+                  onMoveLayer={handleMoveLayer}
                   onImport={() => setIsMediaModalOpen(true)}
                   className="w-full h-full flex flex-col"
                 />
@@ -189,8 +271,14 @@ export default function MotionDuoApp() {
             description={description}
             setDescription={setDescription}
             layers={layers}
+            activeLayerId={activeLayerId}
+            setActiveLayerId={setActiveLayerId}
             onToggleVisibility={handleToggleVisibility}
             onToggleLock={handleToggleLock}
+            onAddLayer={handleAddLayer}
+            onDeleteLayer={handleDeleteLayer}
+            onDuplicateLayer={handleDuplicateLayer}
+            onMoveLayer={handleMoveLayer}
             onImport={() => setIsMediaModalOpen(true)}
             className="w-[320px] h-full flex flex-col"
           />

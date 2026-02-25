@@ -1,8 +1,7 @@
-
 "use client";
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { AppMode, VectorElement, Point, VectorElementType, BoundingBox } from '@/app/lib/motion-duo-types';
+import { AppMode, VectorElement, Point, VectorElementType, BoundingBox, Layer } from '@/app/lib/motion-duo-types';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 
@@ -10,12 +9,14 @@ interface CanvasWorkspaceProps {
   appMode: AppMode;
   isLoading: boolean;
   motionHtml: string | null;
-  onUndo: () => void;
-  onRedo: () => void;
   activeTool: string;
   activeShape: string;
   primaryColor: string;
   canvasColor: string;
+  elements: VectorElement[];
+  setElements: React.Dispatch<React.SetStateAction<VectorElement[]>>;
+  layers: Layer[];
+  activeLayerId: string;
 }
 
 type TransformType = 'move' | 'resize' | 'rotate' | 'none' | 'edit-point';
@@ -31,12 +32,15 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   activeTool,
   activeShape,
   primaryColor,
-  canvasColor
+  canvasColor,
+  elements,
+  setElements,
+  layers,
+  activeLayerId
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  const [elements, setElements] = useState<VectorElement[]>([]);
   const [currentElement, setCurrentElement] = useState<VectorElement | null>(null);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   
@@ -99,7 +103,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     [elements, selectedElementId]
   );
 
-  // Helper to rotate a point around another point
   const rotatePoint = (p: Point, center: Point, angle: number): Point => {
     const s = Math.sin(angle);
     const c = Math.cos(angle);
@@ -112,6 +115,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   };
 
   const isPointInElement = (pos: Point, el: VectorElement): boolean => {
+    const layer = layers.find(l => l.id === el.layerId);
+    if (!layer || !layer.visible || layer.locked) return false;
+
     const bounds = getElementBounds(el);
     let p = pos;
     if (el.rotation) {
@@ -158,7 +164,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    const allElements = currentElement ? [...elements, currentElement] : elements;
+    // Group elements by layer order (bottom to top)
+    const sortedLayers = [...layers].reverse();
+    const sortedElements = sortedLayers.flatMap(layer => 
+      layer.visible ? elements.filter(el => el.layerId === layer.id) : []
+    );
+    
+    const allElements = currentElement ? [...sortedElements, currentElement] : sortedElements;
 
     allElements.forEach((el) => {
       ctx.save();
@@ -210,7 +222,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         ctx.fillText(el.text, el.x || 0, el.y || 0);
       }
 
-      // Render Selection Decorators
       if (selectedElementId === el.id && appMode === 'sketch') {
         ctx.strokeStyle = '#806CE0';
         ctx.lineWidth = 1;
@@ -250,7 +261,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       }
       ctx.restore();
     });
-  }, [elements, currentElement, selectedElementId, appMode]);
+  }, [elements, currentElement, selectedElementId, appMode, layers]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -301,12 +312,18 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       return;
     }
 
-    const id = Math.random().toString(36).substr(2, 9);
+    const id = `el-${Math.random().toString(36).substr(2, 9)}`;
+    const layer = layers.find(l => l.id === activeLayerId);
+    if (layer?.locked) {
+      toast({ title: "Layer Locked", description: "Unlock the active layer to draw." });
+      return;
+    }
+
     if (activeTool === 'pen') {
-      setCurrentElement({ id, type: 'path', points: [pos], color: primaryColor });
+      setCurrentElement({ id, type: 'path', points: [pos], color: primaryColor, layerId: activeLayerId });
     } else if (activeTool === 'shape') {
       const type = activeShape as VectorElementType;
-      setCurrentElement({ id, type, x: pos.x, y: pos.y, width: 0, height: 0, radius: 0, color: primaryColor });
+      setCurrentElement({ id, type, x: pos.x, y: pos.y, width: 0, height: 0, radius: 0, color: primaryColor, layerId: activeLayerId });
     } else if (activeTool === 'eraser') {
       const hit = [...elements].reverse().find(el => isPointInElement(pos, el));
       if (hit) setElements(prev => prev.filter(el => el.id !== hit.id));
@@ -315,7 +332,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       if (hit) setElements(prev => prev.map(el => el.id === hit.id ? { ...el, color: primaryColor } : el));
     } else if (activeTool === 'text') {
       const text = prompt("Enter text:");
-      if (text) setElements(prev => [...prev, { id, type: 'text', x: pos.x, y: pos.y, text, fontSize: 24, color: primaryColor }]);
+      if (text) setElements(prev => [...prev, { id, type: 'text', x: pos.x, y: pos.y, text, fontSize: 24, color: primaryColor, layerId: activeLayerId }]);
     }
   };
 
@@ -338,7 +355,6 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
         if (transformType === 'resize' && activeHandle && initialState) {
           const b = initialState.bounds;
-          // Calculate local delta
           let lp = pos;
           if (el.rotation) {
              lp = rotatePoint(pos, { x: b.centerX, y: b.centerY }, -el.rotation);
@@ -355,20 +371,15 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           if (activeHandle.includes('n')) { newH = b.maxY - lp.y; newY = lp.y; }
 
           if (el.type === 'path' && initialState.points) {
-             const scaleX = (activeHandle.includes('e') || activeHandle.includes('w')) ? (newW / b.width) : 1;
-             const scaleY = (activeHandle.includes('s') || activeHandle.includes('n')) ? (newH / b.height) : 1;
-             
              return {
                ...el,
                points: initialState.points.map(p => {
                  const relX = (p.x - b.minX) / b.width;
                  const relY = (p.y - b.minY) / b.height;
-                 // Re-interpolate based on new bounds
                  const currentMinX = activeHandle.includes('w') ? newX : b.minX;
                  const currentMinY = activeHandle.includes('n') ? newY : b.minY;
                  const currentMaxX = activeHandle.includes('e') ? b.minX + newW : b.maxX;
                  const currentMaxY = activeHandle.includes('s') ? b.minY + newH : b.maxY;
-                 
                  return {
                    x: currentMinX + relX * (currentMaxX - currentMinX),
                    y: currentMinY + relY * (currentMaxY - currentMinY)
