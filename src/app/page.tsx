@@ -137,8 +137,22 @@ export default function MotionDuoApp() {
 
   const triggerMotionSynthesis = async () => {
     const canvas = document.querySelector('canvas');
-    const dataUri = canvas?.toDataURL('image/jpeg', 0.5) || '';
 
+    let dataUri = '';
+    if (canvas instanceof HTMLCanvasElement) {
+      dataUri = canvas.toDataURL('image/jpeg', 0.5);
+    } else {
+      const fallbackCanvas = document.createElement('canvas');
+      fallbackCanvas.width = 2;
+      fallbackCanvas.height = 2;
+      const fallbackCtx = fallbackCanvas.getContext('2d');
+      if (fallbackCtx) {
+        fallbackCtx.fillStyle = canvasColor;
+        fallbackCtx.fillRect(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+      }
+      dataUri = fallbackCanvas.toDataURL('image/jpeg', 0.5);
+      console.warn('[Motion Synthesis] Canvas not found, using fallback canvas snapshot.');
+    }
 
     setIsLoading(true);
     setAppMode('motion');

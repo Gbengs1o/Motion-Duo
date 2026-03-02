@@ -108,7 +108,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const [clipboard, setClipboard] = useState<VectorElement | null>(null);
 
   const { toast } = useToast();
-  
+
   const imageCache = useRef<Record<string, HTMLImageElement>>({});
   const [, forceRender] = useState({});
 
@@ -116,6 +116,35 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     () => elements.find(el => el.id === selectedElementId),
     [elements, selectedElementId],
   );
+
+
+  const motionSrcDoc = useMemo(() => {
+    if (!motionHtml) return '';
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      #motion-root {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="motion-root">${motionHtml}</div>
+  </body>
+</html>`;
+  }, [motionHtml]);
 
   // Safely auto-focus the text input
   useEffect(() => {
@@ -133,9 +162,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     if (primaryColor !== prevColorRef.current) {
       if (selectedElementId && activeTool === 'select') {
         setElements(prev => prev.map(el =>
-          el.id === selectedElementId 
+          el.id === selectedElementId
             // Also update fillColor if the shape already had one
-            ? { ...el, color: primaryColor, fillColor: el.fillColor ? primaryColor : el.fillColor } 
+            ? { ...el, color: primaryColor, fillColor: el.fillColor ? primaryColor : el.fillColor }
             : el
         ));
       }
@@ -206,7 +235,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
-      
+
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') { e.preventDefault(); handleCopy(); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') { e.preventDefault(); handlePaste(); }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -658,18 +687,18 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           if (snap.type === 'text') {
             const scaleX = sb.width > 0 ? newW / sb.width : 1;
             const scaleY = sb.height > 0 ? newH / sb.height : 1;
-            
+
             // Text naturally scales proportionally in canvas apps 
             // We use the largest scaling factor to maintain quality
-            const scale = Math.max(scaleX, scaleY); 
+            const scale = Math.max(scaleX, scaleY);
             const newFontSize = Math.max(8, (snap.fontSize || 24) * scale);
-            
+
             // Ensure the baseline 'y' adjusts correctly to the new top boundary (newMinY)
-            return { 
-              ...el, 
-              x: newMinX, 
-              y: newMinY + newFontSize, 
-              fontSize: newFontSize 
+            return {
+              ...el,
+              x: newMinX,
+              y: newMinY + newFontSize,
+              fontSize: newFontSize
             };
           }
 
@@ -722,13 +751,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const commitText = useCallback(() => {
     if (isCommittingRef.current) return;
     isCommittingRef.current = true;
-    
+
     if (textInput && textValue.trim()) {
       const id = `el-${Math.random().toString(36).substr(2, 9)}`;
       setElements(prev => [...prev, {
         id, type: 'text',
         x: textInput.x,
-        y: textInput.y + 18, 
+        y: textInput.y + 18,
         text: textValue.trim(),
         fontSize: 24,
         color: primaryColor,
@@ -737,7 +766,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     }
     setTextInput(null);
     setTextValue('');
-    
+
     setTimeout(() => {
       isCommittingRef.current = false;
     }, 100);
@@ -783,7 +812,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
       {textInput && (
         <input
-          key={`${textInput.x}-${textInput.y}`} 
+          key={`${textInput.x}-${textInput.y}`}
           ref={textInputRef}
           type="text"
           value={textValue}
@@ -828,20 +857,20 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
       {appMode === 'motion' && motionHtml && !isLoading && (
         <iframe
-          key={`motion-${replayNonce}-${motionHtml.length}`}
+          key={`motion-${replayNonce}-${motionSrcDoc.length}`}
           title="motion-preview"
           className="absolute inset-0 w-full h-full border-0 bg-transparent pointer-events-auto"
-          srcDoc={motionHtml}
+          srcDoc={motionSrcDoc}
           sandbox="allow-scripts"
         />
       )}
 
       {appMode === 'sketch' && activeTool === 'vector' && (
-        <PointEditorPanel 
+        <PointEditorPanel
           selectedElement={selectedElement || null}
           onUpdateElement={(updates) => {
             if (selectedElementId) {
-              setElements(prev => prev.map(el => 
+              setElements(prev => prev.map(el =>
                 el.id === selectedElementId ? { ...el, ...updates } : el
               ));
             }
