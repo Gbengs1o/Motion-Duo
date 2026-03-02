@@ -146,6 +146,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 </html>`;
   }, [motionHtml]);
 
+  const motionPreviewDoc = motionSrcDoc || motionHtml || '';
+
   // Safely auto-focus the text input
   useEffect(() => {
     if (textInput && textInputRef.current) {
@@ -857,10 +859,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
       {appMode === 'motion' && motionHtml && !isLoading && (
         <iframe
-          key={`motion-${replayNonce}-${motionSrcDoc.length}`}
+          key={`motion-${replayNonce}-${motionPreviewDoc.length}`}
           title="motion-preview"
           className="absolute inset-0 w-full h-full border-0 bg-transparent pointer-events-auto"
-          srcDoc={motionSrcDoc}
+          srcDoc={motionPreviewDoc}
           sandbox="allow-scripts"
         />
       )}
