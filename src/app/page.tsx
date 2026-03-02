@@ -13,7 +13,7 @@ import { FloatingDescriptionBox } from '@/components/FloatingDescriptionBox';
 import { DescriptionRequirementModal } from '@/components/DescriptionRequirementModal';
 import { useToast } from '@/hooks/use-toast';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Menu, Layers as LayersIcon, MessageSquareText, Edit3 } from 'lucide-react';
+import { Menu, Layers as LayersIcon, MessageSquareText, Edit3, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useHistory } from '@/hooks/use-history';
@@ -31,6 +31,7 @@ export default function MotionDuoApp() {
   const [generationHistory, setGenerationHistory] = useState<GenerationHistoryItem[]>([]);
   const [latestMotionHtml, setLatestMotionHtml] = useState<string | null>(null);
   const [latestDescription, setLatestDescription] = useState<string>('');
+  const [replayNonce, setReplayNonce] = useState(0);
 
   // Initial loading timeout
   useEffect(() => {
@@ -136,8 +137,22 @@ export default function MotionDuoApp() {
 
   const triggerMotionSynthesis = async () => {
     const canvas = document.querySelector('canvas');
-    const dataUri = canvas?.toDataURL('image/jpeg', 0.5) || '';
 
+    let dataUri = '';
+    if (canvas instanceof HTMLCanvasElement) {
+      dataUri = canvas.toDataURL('image/jpeg', 0.5);
+    } else {
+      const fallbackCanvas = document.createElement('canvas');
+      fallbackCanvas.width = 2;
+      fallbackCanvas.height = 2;
+      const fallbackCtx = fallbackCanvas.getContext('2d');
+      if (fallbackCtx) {
+        fallbackCtx.fillStyle = canvasColor;
+        fallbackCtx.fillRect(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+      }
+      dataUri = fallbackCanvas.toDataURL('image/jpeg', 0.5);
+      console.warn('[Motion Synthesis] Canvas not found, using fallback canvas snapshot.');
+    }
 
     setIsLoading(true);
     setAppMode('motion');
@@ -325,6 +340,9 @@ export default function MotionDuoApp() {
         isDescriptionBoxOpen={isDescriptionBoxOpen}
         onToggleDescriptionBox={() => setIsDescriptionBoxOpen(!isDescriptionBoxOpen)}
         onRetry={triggerMotionSynthesis}
+        onReplay={() => {
+          if (motionHtml) setReplayNonce(n => n + 1);
+        }}
       />
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -366,6 +384,7 @@ export default function MotionDuoApp() {
             layers={layers}
             activeLayerId={activeLayerId}
             onAddLayer={handleAddLayer}
+            replayNonce={replayNonce}
           />
           <BottomControls
             appMode={appMode}
@@ -374,6 +393,17 @@ export default function MotionDuoApp() {
           />
 
           <div className="absolute top-4 right-4 flex flex-col gap-2 md:hidden">
+
+            {appMode === 'motion' && motionHtml && (
+              <Button
+                size="icon"
+                variant="secondary"
+                className="rounded-full shadow-lg h-10 w-10 bg-[#232326] border border-white/10 text-white"
+                onClick={() => setReplayNonce(n => n + 1)}
+              >
+                <RefreshCw className="w-5 h-5" />
+              </Button>
+            )}
             <Sheet>
               <SheetTrigger asChild>
                 <Button size="icon" variant="secondary" className="rounded-full shadow-lg h-10 w-10 bg-[#232326] border border-white/10">
@@ -466,6 +496,8 @@ export default function MotionDuoApp() {
           )}
         >
           <SidePanel
+            activeTab={activePanelTab}
+            onTabChange={setActivePanelTab}
             layers={layers}
             activeLayerId={activeLayerId}
             setActiveLayerId={setActiveLayerId}
@@ -480,6 +512,17 @@ export default function MotionDuoApp() {
             onRenameMedia={handleRenameMedia}
             onDeleteMedia={handleDeleteMedia}
             onAddMediaToCanvas={handleAddMediaToCanvas}
+            generationHistory={generationHistory}
+            onRevertToHistory={handleRevertToHistory}
+            currentMotionHtml={latestMotionHtml}
+            currentDescription={latestDescription}
+            onRestorePresent={() => {
+              if (latestMotionHtml) {
+                setMotionHtml(latestMotionHtml);
+                setDescription(latestDescription);
+                toast({ title: "Present State Restored", description: "Jumped back to the latest generation." });
+              }
+            }}
             className="w-[320px] h-full flex flex-col"
           />
         </div>

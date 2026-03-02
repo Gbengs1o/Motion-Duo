@@ -22,6 +22,7 @@ interface CanvasWorkspaceProps {
   layers: Layer[];
   activeLayerId: string;
   onAddLayer: () => string;
+  replayNonce?: number;
 }
 
 type TransformType = 'move' | 'resize' | 'rotate' | 'none';
@@ -79,7 +80,7 @@ const distToSegment = (p: Point, a: Point, b: Point): number => {
 
 export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   appMode, isLoading, motionHtml, activeTool, activeShape, eraserMode, primaryColor, canvasColor,
-  elements, setElements, layers, activeLayerId, onAddLayer,
+  elements, setElements, layers, activeLayerId, onAddLayer, replayNonce = 0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -115,6 +116,35 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     () => elements.find(el => el.id === selectedElementId),
     [elements, selectedElementId],
   );
+
+
+  const motionSrcDoc = useMemo(() => {
+    if (!motionHtml) return '';
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      #motion-root {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="motion-root">${motionHtml}</div>
+  </body>
+</html>`;
+  }, [motionHtml]);
 
   // Safely auto-focus the text input
   useEffect(() => {
@@ -826,7 +856,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       )}
 
       {appMode === 'motion' && motionHtml && !isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-auto" dangerouslySetInnerHTML={{ __html: motionHtml }} />
+        <iframe
+          key={`motion-${replayNonce}-${motionSrcDoc.length}`}
+          title="motion-preview"
+          className="absolute inset-0 w-full h-full border-0 bg-transparent pointer-events-auto"
+          srcDoc={motionSrcDoc}
+          sandbox="allow-scripts"
+        />
       )}
 
       {appMode === 'sketch' && activeTool === 'vector' && (

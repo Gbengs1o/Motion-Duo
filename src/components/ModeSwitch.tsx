@@ -3,7 +3,7 @@
 import React from 'react';
 import { AppMode } from '@/app/lib/motion-duo-types';
 import { cn } from '@/lib/utils';
-import { Edit3, Activity, Settings, HelpCircle, Share2, PanelRightClose, PanelRightOpen, MessageSquareText, RotateCw } from 'lucide-react';
+import { Edit3, Activity, Settings, HelpCircle, Share2, PanelRightClose, PanelRightOpen, MessageSquareText, RotateCw, RefreshCw } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ModeSwitchProps {
@@ -14,6 +14,7 @@ interface ModeSwitchProps {
   isDescriptionBoxOpen?: boolean;
   onToggleDescriptionBox?: () => void;
   onRetry?: () => void;
+  onReplay?: () => void;
 }
 
 export const ModeSwitch: React.FC<ModeSwitchProps> = ({
@@ -23,7 +24,8 @@ export const ModeSwitch: React.FC<ModeSwitchProps> = ({
   onToggleSidePanel,
   isDescriptionBoxOpen,
   onToggleDescriptionBox,
-  onRetry
+  onRetry,
+  onReplay
 }) => {
   return (
     <div className="h-14 bg-[#232326] border-b border-white/5 flex items-center justify-between px-4 md:px-6 shrink-0 z-50">
@@ -81,13 +83,22 @@ export const ModeSwitch: React.FC<ModeSwitchProps> = ({
 
       <div className="flex items-center gap-1 md:gap-3">
         {mode === 'motion' ? (
-          <button
-            onClick={onRetry}
-            className="p-2 flex items-center justify-center text-primary bg-primary/10 rounded-full hover:bg-primary/20 transition-colors"
-            title="Retry Generation"
-          >
-            <RotateCw className="w-4 h-4" />
-          </button>
+          <>
+            <button
+              onClick={onReplay}
+              className="p-2 flex items-center justify-center text-white/80 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
+              title="Replay Animation"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onRetry}
+              className="p-2 flex items-center justify-center text-primary bg-primary/10 rounded-full hover:bg-primary/20 transition-colors"
+              title="Retry Generation"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
+          </>
         ) : (
           <button className="hidden md:block p-2 text-white/40 hover:text-white transition-colors" title="Share Sketch">
             <Share2 className="w-4 h-4" />
