@@ -22,6 +22,7 @@ interface CanvasWorkspaceProps {
   layers: Layer[];
   activeLayerId: string;
   onAddLayer: () => string;
+  replayNonce?: number;
 }
 
 type TransformType = 'move' | 'resize' | 'rotate' | 'none';
@@ -79,7 +80,7 @@ const distToSegment = (p: Point, a: Point, b: Point): number => {
 
 export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   appMode, isLoading, motionHtml, activeTool, activeShape, eraserMode, primaryColor, canvasColor,
-  elements, setElements, layers, activeLayerId, onAddLayer,
+  elements, setElements, layers, activeLayerId, onAddLayer, replayNonce = 0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -826,7 +827,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       )}
 
       {appMode === 'motion' && motionHtml && !isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-auto" dangerouslySetInnerHTML={{ __html: motionHtml }} />
+        <iframe
+          key={`motion-${replayNonce}-${motionHtml.length}`}
+          title="motion-preview"
+          className="absolute inset-0 w-full h-full border-0 bg-transparent pointer-events-auto"
+          srcDoc={motionHtml}
+          sandbox="allow-scripts"
+        />
       )}
 
       {appMode === 'sketch' && activeTool === 'vector' && (
