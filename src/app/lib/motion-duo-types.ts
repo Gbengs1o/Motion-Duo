@@ -15,7 +15,14 @@ export interface MediaAsset {
   type: 'image' | 'svg';
 }
 
-export type VectorElementType = 'path' | 'rect' | 'circle' | 'triangle' | 'polygon' | 'text';
+export interface GenerationHistoryItem {
+  id: string;
+  timestamp: string;
+  description: string;
+  htmlCode: string;
+}
+
+export type VectorElementType = 'path' | 'rect' | 'circle' | 'triangle' | 'polygon' | 'text' | 'star' | 'diamond' | 'arrow' | 'image';
 
 export interface Point {
   x: number;
@@ -32,8 +39,12 @@ export interface VectorElement {
   height?: number;
   radius?: number;
   rotation?: number; // Rotation in radians
+  anchor?: Point;
   color: string;
+  fillColor?: string;
+  lineWidth?: number;
   text?: string;
+  imageUrl?: string; // For images
   fontSize?: number;
   sides?: number; // For polygons
   layerId: string;
