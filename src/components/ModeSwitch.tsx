@@ -3,7 +3,7 @@
 import React from 'react';
 import { AppMode } from '@/app/lib/motion-duo-types';
 import { cn } from '@/lib/utils';
-import { Edit3, Activity, Settings, HelpCircle, Share2, PanelRightClose, PanelRightOpen, MessageSquareText, RotateCw, RefreshCw } from 'lucide-react';
+import { Edit3, Activity, Settings, HelpCircle, Share2, PanelRightClose, PanelRightOpen, MessageSquareText, RotateCw, RefreshCw, Clapperboard } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ModeSwitchProps {
@@ -15,6 +15,7 @@ interface ModeSwitchProps {
   onToggleDescriptionBox?: () => void;
   onRetry?: () => void;
   onReplay?: () => void;
+  onRender?: () => void;
 }
 
 export const ModeSwitch: React.FC<ModeSwitchProps> = ({
@@ -25,7 +26,8 @@ export const ModeSwitch: React.FC<ModeSwitchProps> = ({
   isDescriptionBoxOpen,
   onToggleDescriptionBox,
   onRetry,
-  onReplay
+  onReplay,
+  onRender
 }) => {
   return (
     <div className="h-14 bg-[#232326] border-b border-white/5 flex items-center justify-between px-4 md:px-6 shrink-0 z-50">
@@ -97,6 +99,13 @@ export const ModeSwitch: React.FC<ModeSwitchProps> = ({
               title="Retry Generation"
             >
               <RotateCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onRender}
+              className="p-2 flex items-center justify-center text-white/80 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
+              title="Render Export"
+            >
+              <Clapperboard className="w-4 h-4" />
             </button>
           </>
         ) : (

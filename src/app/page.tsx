@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { AppMode, Layer, VectorElement, GenerationHistoryItem } from '@/app/lib/motion-duo-types';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { AppMode, Layer, VectorElement, GenerationHistoryItem, MediaAsset } from '@/app/lib/motion-duo-types';
 import { ModeSwitch } from '@/components/ModeSwitch';
 import { Toolbox } from '@/components/Toolbox';
 import { CanvasWorkspace } from '@/components/CanvasWorkspace';
@@ -11,12 +11,265 @@ import { MediaModal } from '@/components/MediaModal';
 import { generateMotionGraphics } from '@/ai/flows/generate-motion-graphics-from-sketch-and-text-flow';
 import { FloatingDescriptionBox } from '@/components/FloatingDescriptionBox';
 import { DescriptionRequirementModal } from '@/components/DescriptionRequirementModal';
+import { RenderDialog, RenderRequest, RenderResolution } from '@/components/RenderDialog';
 import { useToast } from '@/hooks/use-toast';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Layers as LayersIcon, MessageSquareText, Edit3, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useHistory } from '@/hooks/use-history';
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const renderResolutionMap: Record<RenderResolution, { width: number; height: number }> = {
+  '720p': { width: 1280, height: 720 },
+  '1080p': { width: 1920, height: 1080 },
+  square: { width: 1080, height: 1080 },
+};
+
+type RenderProgressUpdate = {
+  percent: number;
+  status: string;
+};
+
+const buildMotionRenderSrcDoc = (motionHtml: string, width: number, height: number) => {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      #render-stage {
+        width: ${width}px;
+        height: ${height}px;
+        position: relative;
+        overflow: hidden;
+        background: transparent;
+      }
+      #motion-root {
+        position: absolute;
+        top: 0;
+        left: 0;
+        transform-origin: top left;
+        will-change: transform;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  </head>
+  <body>
+    <div id="render-stage">
+      <div id="motion-root">${motionHtml}</div>
+    </div>
+    <script>
+      (function() {
+        const CHANNEL = 'motion-duo-render';
+        const renderStage = document.getElementById('render-stage');
+        const motionRoot = document.getElementById('motion-root');
+
+        const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const clampPercent = value => Math.max(0, Math.min(100, Number(value) || 0));
+        const sendProgress = (id, percent, status) => {
+          window.parent.postMessage({
+            channel: CHANNEL,
+            id,
+            progress: {
+              percent: clampPercent(percent),
+              status: String(status || ''),
+            },
+          }, '*');
+        };
+        const getSafeDimension = (value, fallback) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+          return Math.round(parsed);
+        };
+        const applyRenderLayout = payload => {
+          if (!renderStage || !motionRoot) {
+            throw new Error('Render stage is not ready.');
+          }
+
+          const outputWidth = getSafeDimension(payload.width, ${width});
+          const outputHeight = getSafeDimension(payload.height, ${height});
+          const sourceWidth = getSafeDimension(payload.sourceWidth, outputWidth);
+          const sourceHeight = getSafeDimension(payload.sourceHeight, outputHeight);
+
+          renderStage.style.width = outputWidth + 'px';
+          renderStage.style.height = outputHeight + 'px';
+
+          motionRoot.style.width = sourceWidth + 'px';
+          motionRoot.style.height = sourceHeight + 'px';
+
+          const scale = Math.min(outputWidth / sourceWidth, outputHeight / sourceHeight);
+          const scaledWidth = sourceWidth * scale;
+          const scaledHeight = sourceHeight * scale;
+          const offsetX = Math.round((outputWidth - scaledWidth) / 2);
+          const offsetY = Math.round((outputHeight - scaledHeight) / 2);
+          motionRoot.style.transform = 'translate(' + offsetX + 'px,' + offsetY + 'px) scale(' + scale + ')';
+
+          return { outputWidth, outputHeight };
+        };
+        const blobToDataUrl = blob => new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error('Failed to encode render output.'));
+          reader.readAsDataURL(blob);
+        });
+
+        const renderStillPng = async (requestId, payload) => {
+          if (!renderStage || !motionRoot || !window.html2canvas) {
+            throw new Error('Rendering engine not ready.');
+          }
+          sendProgress(requestId, 10, 'Preparing frame...');
+          const { outputWidth, outputHeight } = applyRenderLayout(payload || {});
+          await sleep(120);
+          sendProgress(requestId, 35, 'Capturing frame...');
+          const canvas = await window.html2canvas(renderStage, {
+            backgroundColor: payload.includeBackground ? payload.backgroundColor : null,
+            useCORS: true,
+            scale: 1,
+            width: outputWidth,
+            height: outputHeight,
+            windowWidth: outputWidth,
+            windowHeight: outputHeight,
+          });
+          sendProgress(requestId, 90, 'Encoding PNG...');
+          return canvas.toDataURL('image/png');
+        };
+
+        const selectVideoMimeType = () => {
+          const candidates = ['video/mp4;codecs=h264', 'video/webm;codecs=vp9', 'video/webm'];
+          if (!window.MediaRecorder || !window.MediaRecorder.isTypeSupported) {
+            return candidates[2];
+          }
+          return candidates.find(candidate => window.MediaRecorder.isTypeSupported(candidate)) || candidates[2];
+        };
+
+        const renderVideo = async (requestId, payload) => {
+          if (!renderStage || !motionRoot || !window.html2canvas) {
+            throw new Error('Rendering engine not ready.');
+          }
+          if (!window.MediaRecorder) {
+            throw new Error('Video rendering is not supported in this browser.');
+          }
+
+          const { outputWidth: width, outputHeight: height } = applyRenderLayout(payload || {});
+          const fps = Math.max(12, Math.min(60, payload.frameRate || 30));
+          const durationMs = Math.max(2000, Math.min(30000, (payload.durationSeconds || 6) * 1000));
+          const totalFrames = Math.max(1, Math.round((durationMs / 1000) * fps));
+
+          sendProgress(requestId, 5, 'Initializing video renderer...');
+          const outputCanvas = document.createElement('canvas');
+          outputCanvas.width = width;
+          outputCanvas.height = height;
+          const outputCtx = outputCanvas.getContext('2d', { alpha: !payload.includeBackground });
+          if (!outputCtx) {
+            throw new Error('Unable to initialize the video renderer.');
+          }
+
+          const stream = outputCanvas.captureStream(fps);
+          const mimeType = selectVideoMimeType();
+          const recorder = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: 8_000_000,
+          });
+
+          const chunks = [];
+          recorder.ondataavailable = event => {
+            if (event.data && event.data.size > 0) {
+              chunks.push(event.data);
+            }
+          };
+
+          const stopPromise = new Promise((resolve, reject) => {
+            recorder.onstop = resolve;
+            recorder.onerror = event => reject(event.error || new Error('Video recorder failed.'));
+          });
+
+          sendProgress(requestId, 7, 'Recording video...');
+          recorder.start(250);
+          const frameIntervalMs = 1000 / fps;
+          const start = performance.now();
+
+          for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+            const frameCanvas = await window.html2canvas(renderStage, {
+              backgroundColor: payload.includeBackground ? payload.backgroundColor : null,
+              useCORS: true,
+              scale: 1,
+              width,
+              height,
+              windowWidth: width,
+              windowHeight: height,
+            });
+
+            outputCtx.clearRect(0, 0, width, height);
+            if (payload.includeBackground) {
+              outputCtx.fillStyle = payload.backgroundColor || '#121214';
+              outputCtx.fillRect(0, 0, width, height);
+            }
+            outputCtx.drawImage(frameCanvas, 0, 0, width, height);
+
+            const frameProgress = 8 + ((frameIndex + 1) / totalFrames) * 82;
+            sendProgress(requestId, frameProgress, 'Rendering frames ' + (frameIndex + 1) + '/' + totalFrames + '...');
+
+            const targetElapsed = (frameIndex + 1) * frameIntervalMs;
+            const actualElapsed = performance.now() - start;
+            const delay = targetElapsed - actualElapsed;
+            if (delay > 0) {
+              await sleep(delay);
+            }
+          }
+
+          sendProgress(requestId, 94, 'Encoding video...');
+          recorder.stop();
+          await stopPromise;
+
+          const blob = new Blob(chunks, { type: mimeType });
+          sendProgress(requestId, 99, 'Finalizing file...');
+          return {
+            dataUrl: await blobToDataUrl(blob),
+            mimeType,
+          };
+        };
+
+        window.addEventListener('message', async event => {
+          const data = event.data;
+          if (!data || data.channel !== CHANNEL || !data.id || !data.command) {
+            return;
+          }
+
+          try {
+            if (data.command === 'render-png') {
+              const dataUrl = await renderStillPng(data.id, data.payload || {});
+              sendProgress(data.id, 100, 'PNG export ready.');
+              window.parent.postMessage({ channel: CHANNEL, id: data.id, ok: true, payload: { dataUrl, mimeType: 'image/png' } }, '*');
+              return;
+            }
+            if (data.command === 'render-video') {
+              const output = await renderVideo(data.id, data.payload || {});
+              sendProgress(data.id, 100, 'Video export ready.');
+              window.parent.postMessage({ channel: CHANNEL, id: data.id, ok: true, payload: output }, '*');
+              return;
+            }
+            throw new Error('Unknown render command.');
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            window.parent.postMessage({ channel: CHANNEL, id: data.id, ok: false, error: message }, '*');
+          }
+        });
+
+        window.parent.postMessage({ channel: CHANNEL, ready: true }, '*');
+      })();
+    </script>
+  </body>
+</html>`;
+};
 
 export default function MotionDuoApp() {
   const [appMode, setAppMode] = useState<AppMode>('sketch');
@@ -31,7 +284,19 @@ export default function MotionDuoApp() {
   const [generationHistory, setGenerationHistory] = useState<GenerationHistoryItem[]>([]);
   const [latestMotionHtml, setLatestMotionHtml] = useState<string | null>(null);
   const [latestDescription, setLatestDescription] = useState<string>('');
+  const [attachedMediaIds, setAttachedMediaIds] = useState<string[]>([]);
   const [replayNonce, setReplayNonce] = useState(0);
+  const [isRenderDialogOpen, setIsRenderDialogOpen] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderStatus, setRenderStatus] = useState('Preparing renderer...');
+
+  useEffect(() => {
+    if (isRenderDialogOpen && !isRendering) {
+      setRenderProgress(0);
+      setRenderStatus('Choose settings, then click Render.');
+    }
+  }, [isRenderDialogOpen, isRendering]);
 
   // Initial loading timeout
   useEffect(() => {
@@ -75,7 +340,7 @@ export default function MotionDuoApp() {
   const [activeLayerId, setActiveLayerId] = useState<string>('l1');
 
   // Media Library State
-  const [mediaAssets, setMediaAssets] = useState<import('@/app/lib/motion-duo-types').MediaAsset[]>([]);
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
 
   const handleRenameMedia = (id: string, newName: string) => {
     setMediaAssets(prev => prev.map(m => m.id === id ? { ...m, name: newName } : m));
@@ -83,9 +348,10 @@ export default function MotionDuoApp() {
 
   const handleDeleteMedia = (id: string) => {
     setMediaAssets(prev => prev.filter(m => m.id !== id));
+    setAttachedMediaIds(prev => prev.filter(attachedId => attachedId !== id));
   };
 
-  const handleAddMediaToCanvas = (asset: import('@/app/lib/motion-duo-types').MediaAsset) => {
+  const handleAddMediaToCanvas = (asset: MediaAsset) => {
     const layerId = `l-${Math.random().toString(36).substr(2, 9)}`;
     const newLayer: Layer = {
       id: layerId,
@@ -118,6 +384,34 @@ export default function MotionDuoApp() {
   };
 
   const { toast } = useToast();
+  const recalibrationNotice =
+    "Sorry, there are too many testers on this app right now, so things are a bit slow. Recalibrating servers to create your animation.";
+  const recalibrationToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recalibrationNoticeShownRef = useRef(false);
+
+  const clearRecalibrationNoticeTimer = useCallback(() => {
+    if (recalibrationToastTimeoutRef.current) {
+      clearTimeout(recalibrationToastTimeoutRef.current);
+      recalibrationToastTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleRecalibrationNotice = useCallback(() => {
+    clearRecalibrationNoticeTimer();
+    recalibrationNoticeShownRef.current = false;
+    recalibrationToastTimeoutRef.current = setTimeout(() => {
+      recalibrationNoticeShownRef.current = true;
+      toast({
+        title: "Server Recalibration",
+        description: recalibrationNotice,
+      });
+      recalibrationToastTimeoutRef.current = null;
+    }, 4500);
+  }, [clearRecalibrationNoticeTimer, toast]);
+
+  useEffect(() => {
+    return () => clearRecalibrationNoticeTimer();
+  }, [clearRecalibrationNoticeTimer]);
 
   const handleModeToggle = (mode: AppMode) => {
     if (mode === 'motion' && appMode === 'sketch') {
@@ -156,11 +450,26 @@ export default function MotionDuoApp() {
 
     setIsLoading(true);
     setAppMode('motion');
+    scheduleRecalibrationNotice();
     try {
+      const mediaForPrompt = resolveMediaAssetsForPrompt(description);
+      const requiredMediaNames = mediaAssets
+        .filter(asset => attachedMediaIds.includes(asset.id))
+        .map(asset => asset.name);
       const result = await generateMotionGraphics({
         canvasDataUri: dataUri,
         description: description,
+        mediaAssets: mediaForPrompt.length > 0
+          ? mediaForPrompt.map(({ name, url, type }) => ({ name, url, type }))
+          : undefined,
+        requiredMediaNames: requiredMediaNames.length > 0 ? requiredMediaNames : undefined,
       });
+      if (result.systemNotice && !recalibrationNoticeShownRef.current) {
+        toast({
+          title: "Server Recalibration",
+          description: result.systemNotice,
+        });
+      }
       setMotionHtml(result.htmlCssMotionGraphics);
 
       const newItem: GenerationHistoryItem = {
@@ -173,29 +482,59 @@ export default function MotionDuoApp() {
       setLatestMotionHtml(result.htmlCssMotionGraphics);
       setLatestDescription(description);
     } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message.replace(/^Synthesis Failed:\s*/i, '')
+        : "The AI model encountered an error generating your animation.";
       toast({
         title: "Synthesis Failed",
-        description: "The AI model encountered an error generating your animation.",
+        description: errorMessage,
         variant: "destructive",
       });
       setAppMode('sketch');
     } finally {
+      clearRecalibrationNoticeTimer();
       setIsLoading(false);
     }
   };
+
+  const resolveMediaAssetsForPrompt = useCallback((promptText: string) => {
+    if (mediaAssets.length === 0) return [];
+
+    const attachedSet = new Set(attachedMediaIds);
+    const attachedAssets = mediaAssets.filter(asset => attachedSet.has(asset.id));
+    if (attachedAssets.length > 0) return attachedAssets;
+
+    const normalizedPrompt = promptText.toLowerCase();
+    return mediaAssets.filter(asset => normalizedPrompt.includes(asset.name.toLowerCase()));
+  }, [mediaAssets, attachedMediaIds]);
 
   const handleRefine = async (refinement: string) => {
     if (!motionHtml) return;
 
     setIsLoading(true);
+    scheduleRecalibrationNotice();
     // Clear the description for the next chat message
     setDescription('');
 
     try {
+      const mediaForPrompt = resolveMediaAssetsForPrompt(refinement);
+      const requiredMediaNames = mediaAssets
+        .filter(asset => attachedMediaIds.includes(asset.id))
+        .map(asset => asset.name);
       const result = await generateMotionGraphics({
         description: refinement,
         previousCode: motionHtml,
+        mediaAssets: mediaForPrompt.length > 0
+          ? mediaForPrompt.map(({ name, url, type }) => ({ name, url, type }))
+          : undefined,
+        requiredMediaNames: requiredMediaNames.length > 0 ? requiredMediaNames : undefined,
       });
+      if (result.systemNotice && !recalibrationNoticeShownRef.current) {
+        toast({
+          title: "Server Recalibration",
+          description: result.systemNotice,
+        });
+      }
       setMotionHtml(result.htmlCssMotionGraphics);
 
       const newItem: GenerationHistoryItem = {
@@ -209,14 +548,18 @@ export default function MotionDuoApp() {
       setLatestDescription(refinement);
     } catch (error: any) {
       console.error('[Refinement Error]', error);
+      const errorMessage = error instanceof Error
+        ? error.message.replace(/^Synthesis Failed:\s*/i, '')
+        : "Something went wrong while applying your edits.";
       toast({
         title: "Refinement Failed",
-        description: "Something went wrong while applying your edits.",
+        description: errorMessage,
         variant: "destructive",
       });
       // Restore refinement text so user doesn't lose it
       setDescription(refinement);
     } finally {
+      clearRecalibrationNoticeTimer();
       setIsLoading(false);
     }
   };
@@ -330,6 +673,173 @@ export default function MotionDuoApp() {
     });
   };
 
+  const downloadDataUrl = useCallback((dataUrl: string, filename: string) => {
+    const anchor = document.createElement('a');
+    anchor.href = dataUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }, []);
+
+  const renderMotionAsset = useCallback(async (
+    request: RenderRequest,
+    html: string,
+    onProgress?: (update: RenderProgressUpdate) => void
+  ): Promise<{ dataUrl: string; mimeType: string }> => {
+    const { width, height } = renderResolutionMap[request.resolution];
+    const previewFrame = document.querySelector('iframe[title="motion-preview"]');
+    const sourceWidth = previewFrame instanceof HTMLIFrameElement
+      ? Math.max(1, Math.round(previewFrame.clientWidth))
+      : width;
+    const sourceHeight = previewFrame instanceof HTMLIFrameElement
+      ? Math.max(1, Math.round(previewFrame.clientHeight))
+      : height;
+    const iframe = document.createElement('iframe');
+    // html2canvas may require same-origin document access while cloning; allow-same-origin is enabled
+    // only for this temporary off-screen render iframe.
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-10000px';
+    iframe.style.top = '0';
+    iframe.style.width = `${width}px`;
+    iframe.style.height = `${height}px`;
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    iframe.srcdoc = buildMotionRenderSrcDoc(html, width, height);
+
+    return new Promise((resolve, reject) => {
+      const channel = 'motion-duo-render';
+      const requestId = `render-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      let hasPostedRequest = false;
+
+      const cleanup = () => {
+        window.removeEventListener('message', onMessage);
+        clearTimeout(timeoutId);
+        iframe.remove();
+      };
+
+      const onMessage = (event: MessageEvent) => {
+        const message = event.data;
+        if (event.source !== iframe.contentWindow) return;
+        if (!message || message.channel !== channel) return;
+
+        if (message.id === requestId && message.progress) {
+          onProgress?.({
+            percent: Number(message.progress.percent) || 0,
+            status: String(message.progress.status || 'Rendering...'),
+          });
+          return;
+        }
+
+        if (message.ready && !hasPostedRequest) {
+          hasPostedRequest = true;
+          iframe.contentWindow?.postMessage({
+            channel,
+            id: requestId,
+            command: request.format === 'png' ? 'render-png' : 'render-video',
+            payload: {
+              includeBackground: request.includeBackground,
+              backgroundColor: request.backgroundColor,
+              durationSeconds: request.durationSeconds,
+              frameRate: request.frameRate,
+              width,
+              height,
+              sourceWidth,
+              sourceHeight,
+            },
+          }, '*');
+          return;
+        }
+
+        if (message.id !== requestId) return;
+
+        if (message.ok) {
+          cleanup();
+          resolve(message.payload as { dataUrl: string; mimeType: string });
+          return;
+        }
+
+        cleanup();
+        reject(new Error(message.error || 'Render failed.'));
+      };
+
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('Render timed out. Try a shorter duration or lower resolution.'));
+      }, 90_000);
+
+      window.addEventListener('message', onMessage);
+      document.body.appendChild(iframe);
+    });
+  }, []);
+
+  const handleRender = useCallback(async (request: RenderRequest) => {
+    if (!motionHtml) {
+      toast({
+        title: "No Animation Found",
+        description: "Generate an animation first, then render it.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const effectiveRequest =
+      request.format === 'mp4'
+        ? { ...request, includeBackground: true }
+        : request;
+
+    if (request.format === 'mp4' && !request.includeBackground) {
+      toast({
+        title: "Transparency Notice",
+        description: "MP4 exports do not support alpha transparency, so background was enabled automatically.",
+      });
+    }
+
+    setRenderProgress(1);
+    setRenderStatus('Preparing renderer...');
+    setIsRendering(true);
+    try {
+      await wait(80);
+      const output = await renderMotionAsset(effectiveRequest, motionHtml, progressUpdate => {
+        setRenderProgress(Math.max(1, Math.min(100, Math.round(progressUpdate.percent))));
+        setRenderStatus(progressUpdate.status || 'Rendering...');
+      });
+      const isVideo = effectiveRequest.format === 'mp4';
+      const producedWebm = isVideo && output.mimeType.includes('webm');
+      const extension = isVideo ? (producedWebm ? 'webm' : 'mp4') : 'png';
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `motion-duo-render-${timestamp}.${extension}`;
+
+      setRenderProgress(100);
+      setRenderStatus('Download started.');
+      downloadDataUrl(output.dataUrl, filename);
+      setIsRenderDialogOpen(false);
+
+      if (producedWebm) {
+        toast({
+          title: "Render Complete",
+          description: "MP4 codec was unavailable, so the export was saved as WebM.",
+        });
+      } else {
+        toast({
+          title: "Render Complete",
+          description: `Your ${extension.toUpperCase()} export is downloading.`,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Render failed unexpectedly.";
+      setRenderStatus('Render failed.');
+      toast({
+        title: "Render Failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsRendering(false);
+    }
+  }, [downloadDataUrl, motionHtml, renderMotionAsset, toast]);
+
   return (
     <div className="flex flex-col h-[100dvh] w-screen overflow-hidden text-foreground bg-background">
       <ModeSwitch
@@ -343,6 +853,7 @@ export default function MotionDuoApp() {
         onReplay={() => {
           if (motionHtml) setReplayNonce(n => n + 1);
         }}
+        onRender={() => setIsRenderDialogOpen(true)}
       />
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -368,6 +879,9 @@ export default function MotionDuoApp() {
               onClose={() => setIsDescriptionBoxOpen(false)}
               onRefine={handleRefine}
               appMode={appMode}
+              mediaAssets={mediaAssets}
+              attachedMediaIds={attachedMediaIds}
+              onAttachedMediaIdsChange={setAttachedMediaIds}
             />
           )}
           <CanvasWorkspace
@@ -447,31 +961,33 @@ export default function MotionDuoApp() {
               </SheetContent>
             </Sheet>
 
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button size="icon" variant="secondary" className="rounded-full shadow-lg h-10 w-10 bg-[#232326] border border-white/10">
-                  <Menu className="w-5 h-5 text-white" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="p-0 bg-[#232326] border-white/5 w-20">
-                <SheetHeader className="sr-only">
-                  <SheetTitle>Tools</SheetTitle>
-                </SheetHeader>
-                <Toolbox
-                  className="w-full h-full flex flex-col items-center py-6 gap-6"
-                  activeTool={activeTool}
-                  setActiveTool={setActiveTool}
-                  activeShape={activeShape}
-                  setActiveShape={setActiveShape}
-                  eraserMode={eraserMode}
-                  setEraserMode={setEraserMode}
-                  primaryColor={primaryColor}
-                  setPrimaryColor={setPrimaryColor}
-                  canvasColor={canvasColor}
-                  setCanvasColor={setCanvasColor}
-                />
-              </SheetContent>
-            </Sheet>
+            {appMode === 'sketch' && (
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button size="icon" variant="secondary" className="rounded-full shadow-lg h-10 w-10 bg-[#232326] border border-white/10">
+                    <Menu className="w-5 h-5 text-white" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="p-0 bg-[#232326] border-white/5 w-20">
+                  <SheetHeader className="sr-only">
+                    <SheetTitle>Tools</SheetTitle>
+                  </SheetHeader>
+                  <Toolbox
+                    className="w-full h-full flex flex-col items-center py-6 gap-6"
+                    activeTool={activeTool}
+                    setActiveTool={setActiveTool}
+                    activeShape={activeShape}
+                    setActiveShape={setActiveShape}
+                    eraserMode={eraserMode}
+                    setEraserMode={setEraserMode}
+                    primaryColor={primaryColor}
+                    setPrimaryColor={setPrimaryColor}
+                    canvasColor={canvasColor}
+                    setCanvasColor={setCanvasColor}
+                  />
+                </SheetContent>
+              </Sheet>
+            )}
 
             <Button
               size="icon"
@@ -532,6 +1048,19 @@ export default function MotionDuoApp() {
         isOpen={isMediaModalOpen}
         onClose={() => setIsMediaModalOpen(false)}
         onConfirm={handleImportConfirm}
+      />
+
+      <RenderDialog
+        isOpen={isRenderDialogOpen}
+        onOpenChange={open => {
+          if (isRendering && !open) return;
+          setIsRenderDialogOpen(open);
+        }}
+        onRender={handleRender}
+        isRendering={isRendering}
+        defaultBackgroundColor={canvasColor}
+        renderProgress={renderProgress}
+        renderStatus={renderStatus}
       />
 
       <DescriptionRequirementModal
